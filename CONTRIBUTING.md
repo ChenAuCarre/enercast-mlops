@@ -19,7 +19,10 @@ cd enercast-mlops
 uv sync  # installs the pinned Python version and all dependencies into .venv
 ```
 
-Add dependencies with `uv add <pkg>` (or `uv add --dev <pkg>`) and commit the updated `pyproject.toml` and `uv.lock`.
+Add dependencies to the right group and commit the updated `pyproject.toml` and `uv.lock`:
+* `uv add <pkg>`: runtime, shipped in the Docker image
+* `uv add --dev <pkg>`: tests and linting
+* `uv add --group experiment <pkg>`: notebooks and training
 
 ### Environment Variables & Secrets
 
