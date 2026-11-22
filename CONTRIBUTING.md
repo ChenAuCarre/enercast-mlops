@@ -54,7 +54,7 @@ Before opening a PR, run the checks enforced by `.github/workflows/ci-pr.yml`:
 
 ```bash
 uv run ruff check app/ tests/
-uv run pytest -v --cov=app
+uv run pytest -v
 ```
 
 Tests use fixtures and an isolated mock MLflow registry, so they never touch production models. New features need tests covering:
