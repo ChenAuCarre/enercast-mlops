@@ -82,6 +82,8 @@ enercast-mlops/
 ├── notebooks/               # ML experiments and exploratory analysis
 ├── app/                     # FastAPI inference service, MLflow champion loader, and web UI
 ├── tests/                   # Pytest suite covering predictions, edge-case inputs, and registry gates
+├── pyproject.toml           # Dependencies, split into runtime / dev / experiment groups
+├── uv.lock                  # Locked dependency versions
 ├── Dockerfile               # Slim production Dockerfile (runtime dependencies only)
 └── CONTRIBUTING.md          # Developer setup, Git branching flow, testing & PR checklist
 ```

@@ -19,7 +19,17 @@ cd enercast-mlops
 uv sync  # installs the pinned Python version and all dependencies into .venv
 ```
 
-Add dependencies with `uv add <pkg>` (or `uv add --dev <pkg>`) and commit the updated `pyproject.toml` and `uv.lock`.
+Install only what a task needs:
+
+```bash
+uv sync --no-group experiment                  # tests and linting, as in CI
+uv sync --no-dev --no-group experiment         # runtime only, as in the Docker image
+```
+
+Add dependencies to the right group and commit the updated `pyproject.toml` and `uv.lock`:
+* `uv add <pkg>`: runtime, shipped in the Docker image
+* `uv add --dev <pkg>`: tests and linting
+* `uv add --group experiment <pkg>`: notebooks and training
 
 ### Environment Variables & Secrets
 
@@ -54,7 +64,7 @@ Before opening a PR, run the checks enforced by `.github/workflows/ci-pr.yml`:
 
 ```bash
 uv run ruff check app/ tests/
-uv run pytest -v --cov=app
+uv run pytest -v
 ```
 
 Tests use fixtures and an isolated mock MLflow registry, so they never touch production models. New features need tests covering:
