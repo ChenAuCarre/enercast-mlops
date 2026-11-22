@@ -9,7 +9,7 @@ This repo is a production MLOps reference, and PR history tracks each contributo
 ### Prerequisites
 * [uv](https://docs.astral.sh/uv/) (manages Python and dependencies)
 * Docker (for local container smoke testing)
-* Access to the team's DagsHub MLflow server and Azure Blob Storage DVC remote
+* Access to the team's DagsHub project (MLflow server and DVC remote)
 
 ### Installation
 
@@ -26,8 +26,7 @@ Add dependencies with `uv add <pkg>` (or `uv add --dev <pkg>`) and commit the up
 Required variables:
 * `MLFLOW_TRACKING_URI`
 * `MLFLOW_TRACKING_USERNAME`
-* `MLFLOW_TRACKING_PASSWORD`
-* `AZURE_STORAGE_CONNECTION_STRING`
+* `MLFLOW_TRACKING_PASSWORD` (the DagsHub token, also used as the DVC remote password)
 * `REFRESH_API_TOKEN`
 
 **Never expose secrets** in commits, logs, notebook outputs, screenshots, issues, or PR descriptions. If a secret leaks, rotate it immediately.

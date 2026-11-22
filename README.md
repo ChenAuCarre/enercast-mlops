@@ -12,7 +12,7 @@
 flowchart TB
     subgraph Training["Continuous Training"]
         direction LR
-        DVC[("Azure Blob<br/>DVC data v1/v2")] --> CT["GitHub Actions<br/>CT pipeline"]
+        DVC[("DagsHub Storage<br/>DVC data v1/v2")] --> CT["GitHub Actions<br/>CT pipeline"]
     end
     CT -- "log + register<br/>(@champion if gates pass)" --> MLF[("DagsHub MLflow<br/>Tracking + Registry")]
     subgraph Serving["Serving"]
@@ -23,7 +23,7 @@ flowchart TB
 ```
 
 * **Application & Inference**: Python, FastAPI, Pydantic, Scikit-Learn
-* **Data Versioning**: DVC with Azure Blob Storage remote
+* **Data Versioning**: DVC with DagsHub Storage remote
 * **Experiment Tracking & Registry**: MLflow tracking server and model registry on DagsHub
 * **Containerization & Operations**: Slim Docker image adhering to the [Twelve-Factor App](docs/DEPLOYMENT.md) methodology
 * **Automation**: GitHub Actions for PR validation, staging verification, production deployment, gated continuous training, and rollback
@@ -64,7 +64,7 @@ All GitHub Actions workflows live under `.github/workflows/`:
 | **`ci-pr.yml`** | `pull_request` $\rightarrow$ `dev`, `staging`, `main` | Runs static linting, `pytest` suite (with controlled test registry), Docker build, and container smoke test. |
 | **`cd-staging.yml`** | `push` (merge) $\rightarrow$ `staging` | Validates the release candidate container and readiness endpoints in a staging environment. |
 | **`cd-prod.yml`** | `push` (merge) $\rightarrow$ `main` | Tags image with commit SHA, deploys to production, waits for `/health` readiness, and runs a live prediction smoke test. |
-| **`ct-retrain.yml`** | `workflow_dispatch` (`dataset_version`) | Fetches DVC snapshot from Azure, validates data contract, evaluates `@champion`, trains & gates candidate, promotes if passing, and refreshes production. |
+| **`ct-retrain.yml`** | `workflow_dispatch` (`dataset_version`) | Fetches DVC snapshot from DagsHub, validates data contract, evaluates `@champion`, trains & gates candidate, promotes if passing, and refreshes production. |
 | **`rollback.yml`** | `workflow_dispatch` (`target_version`) | Reassigns `@champion` alias to a previously approved version, refreshes/redeploys production, and verifies via live prediction. |
 
 ---
@@ -74,7 +74,7 @@ All GitHub Actions workflows live under `.github/workflows/`:
 ```text
 enercast-mlops/
 ├── .github/workflows/       # CI, Staging CD, Prod CD, CT Retraining, and Rollback pipelines
-├── .dvc/                    # DVC remote configuration (Azure Blob Storage)
+├── .dvc/                    # DVC remote configuration (DagsHub Storage)
 ├── data/                    # DVC pointer files (.dvc) for raw data, v1, and v2 splits
 ├── docs/
 │   ├── API.md               # REST API schemas, sample payloads, validation rules & error codes
