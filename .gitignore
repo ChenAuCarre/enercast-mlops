@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Environnements
+.venv/
+venv/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# MLflow
+mlruns/
+
+# Tests et qualité
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Mac
+.DS_Store

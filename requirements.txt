@@ -1,0 +1,20 @@
+# Data science
+numpy
+pandas
+scipy
+scikit-learn
+matplotlib
+seaborn
+jupyter
+
+# MLOps
+dvc
+dagshub
+mlflow
+
+# Model serialization
+joblib
+
+# Testing and code quality
+pytest
+ruff
