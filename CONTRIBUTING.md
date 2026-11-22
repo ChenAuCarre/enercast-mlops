@@ -19,6 +19,13 @@ cd enercast-mlops
 uv sync  # installs the pinned Python version and all dependencies into .venv
 ```
 
+Install only what a task needs:
+
+```bash
+uv sync --no-group experiment                  # tests and linting, as in CI
+uv sync --no-dev --no-group experiment         # runtime only, as in the Docker image
+```
+
 Add dependencies to the right group and commit the updated `pyproject.toml` and `uv.lock`:
 * `uv add <pkg>`: runtime, shipped in the Docker image
 * `uv add --dev <pkg>`: tests and linting
