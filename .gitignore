@@ -5,7 +5,7 @@ __pycache__/
 dist/
 build/
 
-# Environnements
+# Environments
 .venv/
 venv/
 
@@ -17,7 +17,7 @@ venv/
 # MLflow
 mlruns/
 
-# Tests et qualité
+# Tests and quality
 .pytest_cache/
 .ruff_cache/
 .coverage
@@ -28,4 +28,3 @@ htmlcov/
 
 # Mac
 .DS_Store
-
