@@ -3,6 +3,7 @@ name: ci-pr
 on:
   pull_request:
     branches: [dev, staging, main]
+    types: [opened, synchronize, reopened, edited]  # edited: re-check PR title
 
 concurrency:
   group: ci-pr-${{ github.ref }}
@@ -16,14 +17,24 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      - run: uv lock --check
       - run: uv sync --frozen --only-group dev
       - run: uv run ruff check .
       - run: uv run ruff format --check .
 
+  pr-title:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # Single required check for branch protection; add new jobs to `needs`.
   ci-pass:
     if: always()
-    needs: [lint]
+    needs: [lint, pr-title]
     runs-on: ubuntu-latest
     steps:
       - run: |
