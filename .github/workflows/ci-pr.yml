@@ -1,0 +1,30 @@
+name: ci-pr
+
+on:
+  pull_request:
+    branches: [dev, staging, main]
+
+concurrency:
+  group: ci-pr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --only-group dev
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  # Single required check for branch protection; add new jobs to `needs`.
+  ci-pass:
+    if: always()
+    needs: [lint]
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "false" ]
