@@ -10,16 +10,10 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-from ml.preprocess import prepare_training_data
-
-TRAIN_PATH = Path("data/versions/v1/train.csv")
-TEST_PATH = Path("data/versions/test/final_test.csv")
-
-DATASET_VERSION = "v1"
-TRAIN_DVC_HASH = "b2fc482fe85cd1779a0faa5f7d6de625"
-TEST_DVC_HASH = "082db6d3abab0442e8721d732e1db116"
-
 EXPERIMENT_NAME = "WattWise-energy-forecasting-final"
+
+# Version utilisée par l'entrée de secours `python -m ml.train`.
+DATASET_VERSION = "v1"
 
 MODELS = {
     "baseline-linear-regression-v1": {
@@ -60,30 +54,28 @@ def get_git_commit():
     ).strip()
 
 
-def evaluate_model(model, X_test, y_test):
-    predictions = model.predict(X_test)
+def evaluate_model(model, X_eval, y_eval):
+    """Calcule les prédictions et les métriques sur un jeu d'évaluation."""
+    predictions = model.predict(X_eval)
 
     metrics = {
-        "mae": float(mean_absolute_error(y_test, predictions)),
-        "rmse": float(mean_squared_error(y_test, predictions) ** 0.5),
-        "r2": float(r2_score(y_test, predictions)),
+        "mae": float(mean_absolute_error(y_eval, predictions)),
+        "rmse": float(mean_squared_error(y_eval, predictions) ** 0.5),
+        "r2": float(r2_score(y_eval, predictions)),
     }
 
     return predictions, metrics
 
 
-def run_experiment(
-    run_name,
-    config,
-    X_train,
-    y_train,
-    X_test,
-    y_test,
-    dataset_version=DATASET_VERSION,
-    train_dvc_hash=TRAIN_DVC_HASH,
-    test_dvc_hash=TEST_DVC_HASH,
-):
+def run_experiment(run_name, config, data):
+    """Entraîne un modèle et journalise l'expérience dans MLflow.
+
+    Seuls l'entraînement et la validation sont utilisés ici. Le jeu de test
+    final n'est ni lu, ni évalué : il reste réservé à l'évaluation finale
+    indépendante (`python -m ml.pipeline --final-evaluation`).
+    """
     model = config["estimator"]
+    dataset_version = data["dataset_version"]
 
     with mlflow.start_run(run_name=run_name) as run:
         git_commit = get_git_commit()
@@ -92,12 +84,16 @@ def run_experiment(
         mlflow.log_params(
             {
                 "dataset_version": dataset_version,
-                "train_dvc_hash": train_dvc_hash,
-                "test_dvc_hash": test_dvc_hash,
+                "train_dvc_hash": data["train_dvc_hash"],
                 "model_type": config["model_type"],
-                "train_rows": len(X_train),
-                "test_rows": len(X_test),
-                "feature_count": X_train.shape[1],
+                "train_rows": len(data["X_train"]),
+                "validation_rows": len(data["X_validation"]),
+                "feature_count": data["X_train"].shape[1],
+                "validation_fraction": data["validation_fraction"],
+                "train_period_start": data["train_period"][0],
+                "train_period_end": data["train_period"][1],
+                "validation_period_start": data["validation_period"][0],
+                "validation_period_end": data["validation_period"][1],
             }
         )
 
@@ -105,20 +101,33 @@ def run_experiment(
             {
                 "git_commit": git_commit,
                 "model_role": config["role"],
-                "evaluation_split": "final_test_exploratory",
-                "promotion_eligible": "false",
+                "selection_split": "validation",
+                "final_test_usage": "separate_final_evaluation",
+                "final_test_used_for_selection": "false",
+                "promotion_eligible": "true",
             }
         )
 
-        model.fit(X_train, y_train)
-        predictions, metrics = evaluate_model(model, X_test, y_test)
+        model.fit(data["X_train"], data["y_train"])
 
-        mlflow.log_metrics(metrics)
+        validation_predictions, validation_metrics = evaluate_model(
+            model,
+            data["X_validation"],
+            data["y_validation"],
+        )
+
+        mlflow.log_metrics(
+            {
+                "validation_mae": validation_metrics["mae"],
+                "validation_rmse": validation_metrics["rmse"],
+                "validation_r2": validation_metrics["r2"],
+            }
+        )
 
         model_info = mlflow.sklearn.log_model(
             sk_model=model,
             name="model",
-            input_example=X_train.head(3),
+            input_example=data["X_train"].head(3),
             skops_trusted_types=[
                 "sklearn.tree._tree.Tree",
                 "sklearn.ensemble._hist_gradient_boosting.predictor.TreePredictor",
@@ -130,68 +139,66 @@ def run_experiment(
 
             metrics_path = temp_path / "metrics.json"
             metrics_path.write_text(
-                json.dumps(metrics, indent=4),
+                json.dumps(
+                    {
+                        "dataset_version": dataset_version,
+                        "evaluation_split": "validation",
+                        "validation": validation_metrics,
+                    },
+                    indent=4,
+                ),
                 encoding="utf-8",
             )
 
-            predictions_path = temp_path / "predictions.csv"
+            validation_predictions_path = temp_path / "validation_predictions.csv"
             pd.DataFrame(
                 {
-                    "actual": y_test.to_numpy(),
-                    "predicted": predictions,
+                    "actual": data["y_validation"].to_numpy(),
+                    "predicted": validation_predictions,
                 }
-            ).to_csv(predictions_path, index=False)
+            ).to_csv(validation_predictions_path, index=False)
 
             mlflow.log_artifact(str(metrics_path))
-            mlflow.log_artifact(str(predictions_path))
+            mlflow.log_artifact(str(validation_predictions_path))
 
         print(f"\n--- {run_name} ---")
         print(f"Run ID: {run.info.run_id}")
         print(f"Model ID: {model_info.model_id}")
-        print(f"MAE: {metrics['mae']:.3f}")
-        print(f"RMSE: {metrics['rmse']:.3f}")
-        print(f"R²: {metrics['r2']:.3f}")
+        print(
+            f"Validation MAE: {validation_metrics['mae']:.3f} | "
+            f"RMSE: {validation_metrics['rmse']:.3f} | "
+            f"R²: {validation_metrics['r2']:.3f}"
+        )
 
         return {
             "run_id": run.info.run_id,
             "model_id": model_info.model_id,
-            "metrics": metrics,
+            "metrics": validation_metrics,
         }
 
 
 def main():
-    train_df = pd.read_csv(TRAIN_PATH)
-    test_df = pd.read_csv(TEST_PATH)
+    # Import local pour éviter un cycle d'imports entre ml.pipeline et ml.train.
+    from ml.pipeline import load_data
 
-    X_train, y_train = prepare_training_data(train_df)
-    X_test, y_test = prepare_training_data(test_df)
-
-    if list(X_train.columns) != list(X_test.columns):
-        raise ValueError("Training and test feature columns do not match")
+    data = load_data(DATASET_VERSION)
 
     mlflow.set_experiment(EXPERIMENT_NAME)
 
     results = {}
 
     for run_name, config in MODELS.items():
-        results[run_name] = run_experiment(
-            run_name,
-            config,
-            X_train,
-            y_train,
-            X_test,
-            y_test,
-        )
+        results[run_name] = run_experiment(run_name, config, data)
 
-    print("\n--- MODEL COMPARISON ---")
+    print("\n--- MODEL COMPARISON (validation) ---")
 
     for run_name, result in results.items():
         metrics = result["metrics"]
         print(
             f"{run_name}: "
-            f"MAE={metrics['mae']:.3f}, "
-            f"RMSE={metrics['rmse']:.3f}, "
-            f"R²={metrics['r2']:.3f}"
+            f"validation MAE={metrics['mae']:.3f}, "
+            f"validation RMSE={metrics['rmse']:.3f}, "
+            f"validation R²={metrics['r2']:.3f}"
         )
 
     best_model = min(
@@ -199,11 +206,11 @@ def main():
         key=lambda name: results[name]["metrics"]["mae"],
     )
 
-    print(f"\nBest model according to MAE: {best_model}")
+    print(f"\nBest model according to validation MAE: {best_model}")
     print(f"Run ID: {results[best_model]['run_id']}")
 
     print(
-        "\nNote: this comparison identifies the lowest-MAE model. "
+        "\nNote: this comparison identifies the lowest validation-MAE model. "
         "It does not automatically approve or promote it."
     )
 
