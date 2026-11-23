@@ -17,6 +17,10 @@ _MISSING_CHAMPION_ERROR_CODES = {
 }
 
 
+class NoChampionRegistered(RuntimeError):
+    """Aucun champion n'est encore enregistré dans le registre MLflow."""
+
+
 def get_client():
     """Return the MLflow client using the configured tracking server."""
     return MlflowClient()
@@ -54,7 +58,7 @@ def get_champion():
         )
     except MlflowException as exc:
         if _is_missing_champion_error(exc):
-            raise RuntimeError(
+            raise NoChampionRegistered(
                 f"No champion model is registered yet: alias "
                 f"'{CHAMPION_ALIAS}' is missing on model '{MODEL_NAME}'."
             ) from exc

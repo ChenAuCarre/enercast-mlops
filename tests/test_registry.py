@@ -17,7 +17,12 @@ from mlflow.protos.databricks_pb2 import (
     UNAUTHENTICATED,
 )
 
-from ml.registry import CHAMPION_ALIAS, MODEL_NAME, get_champion
+from ml.registry import (
+    CHAMPION_ALIAS,
+    MODEL_NAME,
+    NoChampionRegistered,
+    get_champion,
+)
 
 
 class FakeClient:
@@ -59,7 +64,9 @@ def test_missing_registered_model_means_no_champion(monkeypatch):
     )
     install_client(monkeypatch, FakeClient(error=error))
 
-    with pytest.raises(RuntimeError, match="No champion model is registered yet"):
+    with pytest.raises(
+        NoChampionRegistered, match="No champion model is registered yet"
+    ):
         get_champion()
 
 
@@ -71,11 +78,16 @@ def test_missing_alias_means_no_champion(monkeypatch):
     install_client(monkeypatch, FakeClient(error=error))
 
     with pytest.raises(
-        RuntimeError, match="No champion model is registered yet"
+        NoChampionRegistered, match="No champion model is registered yet"
     ) as info:
         get_champion()
 
     assert info.value.__cause__ is error
+
+
+def test_no_champion_error_stays_a_runtime_error():
+    """Compatibilité : les appelants existants attrapent RuntimeError."""
+    assert issubclass(NoChampionRegistered, RuntimeError)
 
 
 @pytest.mark.parametrize(

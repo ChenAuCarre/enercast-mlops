@@ -9,6 +9,7 @@ import pandas as pd
 from ml.policy import evaluate_candidate, evaluate_initial_models
 from ml.preprocess import FEATURE_COLUMNS, prepare_training_data
 from ml.registry import (
+    NoChampionRegistered,
     get_champion,
     load_champion_model,
     promote_model,
@@ -102,8 +103,34 @@ def load_final_test_data():
     return X_test, y_test, _period(test_df)
 
 
-def run_v1():
+def run_v1(force=False):
+    """Entraînement initial (v1), puis promotion du modèle de référence.
+
+    Par défaut, refuse de s'exécuter si un champion existe déjà : relancer
+    v1 déplacerait l'alias ``champion`` vers le baseline v1 et écraserait un
+    champion plus récent (typiquement le candidat v2). Le drapeau
+    ``force=True`` (CLI : ``--force-initial-training``) autorise
+    explicitement cet écrasement.
+    """
     print("\n=== INITIAL TRAINING: VERSION 1 ===")
+
+    if not force:
+        try:
+            existing_champion = get_champion()
+        except NoChampionRegistered:
+            existing_champion = None
+
+        if existing_champion is not None:
+            raise RuntimeError(
+                "Refusing to run initial training: champion version "
+                f"{existing_champion.version} already exists. Re-running v1 "
+                "would replace it. Use --force-initial-training to override."
+            )
+    else:
+        print(
+            "Warning: --force-initial-training enabled; "
+            "the current champion may be replaced by the v1 baseline."
+        )
 
     data = load_data("v1")
     mlflow.set_experiment(EXPERIMENT_NAME)
@@ -340,6 +367,14 @@ def main():
         default="v2",
         help="Version de référence journalisée lors de l'évaluation finale.",
     )
+    parser.add_argument(
+        "--force-initial-training",
+        action="store_true",
+        help=(
+            "Autorise run_v1 à remplacer un champion existant. "
+            "À n'utiliser qu'après une réinitialisation volontaire."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -348,7 +383,7 @@ def main():
         return
 
     if args.dataset_version == "v1":
-        run_v1()
+        run_v1(force=args.force_initial_training)
         return
 
     if args.dataset_version == "v2":

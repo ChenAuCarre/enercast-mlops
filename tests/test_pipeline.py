@@ -1,13 +1,14 @@
-"""Tests d'isolation du test final dans le chemin de promotion.
+"""Tests du chemin de promotion.
 
-Le chemin entraînement / validation / promotion ne doit jamais lire ni
-évaluer ``final_test``. Ces tests le vérifient en rendant toute lecture du
-test final immédiatement fatale.
+Deux garanties sont vérifiées : le test final n'est jamais lu pendant
+l'entraînement/la promotion, et ``run_v1`` ne peut pas écraser un champion
+existant sans autorisation explicite.
 """
 
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 from sklearn.linear_model import LinearRegression
 
 from ml.pipeline import (
@@ -16,7 +17,11 @@ from ml.pipeline import (
     run_v1,
     run_v2,
 )
+from ml.pipeline import (
+    main as pipeline_main,
+)
 from ml.preprocess import FEATURE_COLUMNS, prepare_training_data
+from ml.registry import NoChampionRegistered
 from ml.splits import split_train_validation
 from ml.train import run_experiment
 
@@ -117,6 +122,14 @@ def forbid_promotion(*args, **kwargs):
     raise AssertionError("L'évaluation finale ne doit jamais promouvoir de modèle.")
 
 
+def forbid_training(*args, **kwargs):
+    raise AssertionError("run_v1 doit s'arrêter avant tout chargement ou entraînement.")
+
+
+def no_champion():
+    raise NoChampionRegistered("No champion model is registered yet.")
+
+
 def test_load_data_never_reads_final_test(monkeypatch):
     monkeypatch.setattr("ml.pipeline.load_final_test", forbid_final_test_read)
     monkeypatch.setattr(pd, "read_csv", lambda *args, **kwargs: synthetic_pool())
@@ -151,6 +164,7 @@ def test_run_experiment_does_not_require_final_test(monkeypatch):
 
 
 def test_run_v1_promotion_path_never_reads_final_test(monkeypatch):
+    monkeypatch.setattr("ml.pipeline.get_champion", no_champion)
     monkeypatch.setattr("ml.pipeline.load_final_test", forbid_final_test_read)
     monkeypatch.setattr("ml.pipeline.load_data", lambda version: promotion_data())
     monkeypatch.setattr(
@@ -176,6 +190,85 @@ def test_run_v1_promotion_path_never_reads_final_test(monkeypatch):
     monkeypatch.setattr("ml.pipeline.mlflow", FakeMlflow())
 
     run_v1()
+
+
+def test_run_v1_refuses_to_replace_an_existing_champion(monkeypatch):
+    monkeypatch.setattr(
+        "ml.pipeline.get_champion",
+        lambda: SimpleNamespace(version="7"),
+    )
+    monkeypatch.setattr("ml.pipeline.load_data", forbid_training)
+    monkeypatch.setattr("ml.pipeline.run_experiment", forbid_training)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Refusing to run initial training",
+    ) as info:
+        run_v1()
+
+    assert "version 7" in str(info.value)
+    assert "--force-initial-training" in str(info.value)
+
+
+def test_run_v1_force_allows_replacing_an_existing_champion(monkeypatch):
+    monkeypatch.setattr(
+        "ml.pipeline.get_champion",
+        lambda: SimpleNamespace(version="7"),
+    )
+    monkeypatch.setattr("ml.pipeline.load_data", lambda version: promotion_data())
+
+    calls = {}
+
+    def fake_run_experiment(*args, **kwargs):
+        calls["training"] = True
+        return {
+            "model_id": "model-9",
+            "run_id": "run-9",
+            "metrics": {"mae": 40.0, "rmse": 50.0, "r2": 0.5},
+        }
+
+    monkeypatch.setattr("ml.pipeline.run_experiment", fake_run_experiment)
+    monkeypatch.setattr(
+        "ml.pipeline.evaluate_initial_models",
+        lambda results: {"promote": True, "reason": "ok"},
+    )
+    monkeypatch.setattr(
+        "ml.pipeline.register_model",
+        lambda model_id: SimpleNamespace(version="8"),
+    )
+    monkeypatch.setattr(
+        "ml.pipeline.promote_model",
+        lambda version: SimpleNamespace(version="8"),
+    )
+    monkeypatch.setattr("ml.pipeline.mlflow", FakeMlflow())
+
+    run_v1(force=True)
+
+    assert calls["training"] is True
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected_force"),
+    [
+        (["pipeline", "--dataset-version", "v1"], False),
+        (
+            ["pipeline", "--dataset-version", "v1", "--force-initial-training"],
+            True,
+        ),
+    ],
+)
+def test_cli_forwards_the_force_flag(monkeypatch, argv, expected_force):
+    received = {}
+
+    monkeypatch.setattr(
+        "ml.pipeline.run_v1",
+        lambda force=False: received.update(force=force),
+    )
+    monkeypatch.setattr("sys.argv", argv)
+
+    pipeline_main()
+
+    assert received["force"] is expected_force
 
 
 def test_run_v2_promotion_path_never_reads_final_test(monkeypatch):
