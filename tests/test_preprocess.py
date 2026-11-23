@@ -65,11 +65,6 @@ def test_uci_and_api_column_names_are_equivalent(raw_data):
 
     api_data = raw_data.drop(
         columns=["T_out", "Press_mm_hg", "Appliances", "rv1", "rv2"]
-    ).rename(
-        columns={
-            "T_out": "To",
-            "Press_mm_hg": "Pressure",
-        }
     )
 
     # Recreate the API input with the expected names.
