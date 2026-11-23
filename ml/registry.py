@@ -3,9 +3,18 @@ import time
 import mlflow
 import mlflow.sklearn
 from mlflow import MlflowClient
+from mlflow.exceptions import MlflowException
 
 MODEL_NAME = "wattwise-energy-forecaster-final"
 CHAMPION_ALIAS = "champion"
+
+# Codes MLflow qui peuvent signaler un champion absent. Le code seul ne
+# suffit pas : INVALID_PARAMETER_VALUE sert aussi à d'autres erreurs, d'où
+# la vérification du message dans `_is_missing_champion_error`.
+_MISSING_CHAMPION_ERROR_CODES = {
+    "RESOURCE_DOES_NOT_EXIST",
+    "INVALID_PARAMETER_VALUE",
+}
 
 
 def get_client():
@@ -13,8 +22,29 @@ def get_client():
     return MlflowClient()
 
 
+def _is_missing_champion_error(exc):
+    """Indique si l'erreur MLflow signifie réellement « aucun champion ».
+
+    Un alias absent et un modèle absent doivent être distingués des erreurs
+    d'authentification, de réseau ou de serveur : ces dernières ne doivent
+    jamais être présentées comme « aucun champion enregistré ».
+    """
+    if str(getattr(exc, "error_code", "")) not in _MISSING_CHAMPION_ERROR_CODES:
+        return False
+
+    message = str(exc).lower()
+
+    return "not found" in message and any(
+        keyword in message for keyword in ("alias", "registered model", "model version")
+    )
+
+
 def get_champion():
-    """Return the currently approved champion model version."""
+    """Return the currently approved champion model version.
+
+    Seule l'absence effective du modèle ou de l'alias est convertie en
+    ``RuntimeError``. Toute autre erreur MLflow est propagée telle quelle.
+    """
     client = get_client()
 
     try:
@@ -22,8 +52,21 @@ def get_champion():
             MODEL_NAME,
             CHAMPION_ALIAS,
         )
-    except Exception as exc:
-        raise RuntimeError("No champion model is registered yet.") from exc
+    except MlflowException as exc:
+        if _is_missing_champion_error(exc):
+            raise RuntimeError(
+                f"No champion model is registered yet: alias "
+                f"'{CHAMPION_ALIAS}' is missing on model '{MODEL_NAME}'."
+            ) from exc
+
+        # Une erreur d'authentification, de réseau ou de serveur ne signifie
+        # pas qu'aucun champion existe : on la laisse remonter intacte.
+        exc.add_note(
+            "Lecture du champion MLflow impossible. Vérifier "
+            "MLFLOW_TRACKING_URI, les identifiants et la disponibilité du "
+            "serveur de tracking."
+        )
+        raise
 
 
 def get_champion_version():
