@@ -5,6 +5,7 @@ l'entraînement/la promotion, et ``run_v1`` ne peut pas écraser un champion
 existant sans autorisation explicite.
 """
 
+import hashlib
 from types import SimpleNamespace
 
 import pandas as pd
@@ -13,9 +14,11 @@ from sklearn.linear_model import LinearRegression
 
 from ml.pipeline import (
     load_data,
+    read_dvc_metadata,
     run_final_evaluation,
     run_v1,
     run_v2,
+    verify_dvc_hash,
 )
 from ml.pipeline import (
     main as pipeline_main,
@@ -140,6 +143,110 @@ def test_load_data_never_reads_final_test(monkeypatch):
     assert "y_test" not in data
     assert len(data["X_train"]) == 34
     assert len(data["X_validation"]) == 6
+
+
+def test_load_data_verifies_the_training_dvc_hash(monkeypatch):
+    calls = {}
+
+    def fake_verify(path, expected_hash):
+        calls["path"] = path
+        calls["expected_hash"] = expected_hash
+        return expected_hash
+
+    monkeypatch.setattr("ml.pipeline.verify_dvc_hash", fake_verify)
+
+    load_data("v1")
+
+    assert calls["expected_hash"] == "b2fc482fe85cd1779a0faa5f7d6de625"
+
+
+def test_read_dvc_metadata_reads_the_hash(tmp_path):
+    metadata_path = tmp_path / "train.csv.dvc"
+    metadata_path.write_text(
+        "outs:\n"
+        "- md5: b2fc482fe85cd1779a0faa5f7d6de625\n"
+        "  size: 100\n"
+        "  hash: md5\n"
+        "  path: train.csv\n",
+        encoding="utf-8",
+    )
+
+    resolved_path, checksum = read_dvc_metadata(
+        str(metadata_path),
+        str(tmp_path / "train.csv"),
+    )
+
+    assert resolved_path == str(tmp_path / "train.csv")
+    assert checksum == "b2fc482fe85cd1779a0faa5f7d6de625"
+
+
+def test_read_dvc_metadata_missing_file(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        read_dvc_metadata(
+            str(tmp_path / "missing.csv.dvc"),
+            str(tmp_path / "missing.csv"),
+        )
+
+
+def test_read_dvc_metadata_rejects_missing_outs(tmp_path):
+    metadata_path = tmp_path / "train.csv.dvc"
+    metadata_path.write_text("foo: bar\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="un seul 'outs'"):
+        read_dvc_metadata(
+            str(metadata_path),
+            str(tmp_path / "train.csv"),
+        )
+
+
+def test_read_dvc_metadata_rejects_missing_md5(tmp_path):
+    metadata_path = tmp_path / "train.csv.dvc"
+    metadata_path.write_text("outs:\n- path: train.csv\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="checksum MD5 attendu"):
+        read_dvc_metadata(
+            str(metadata_path),
+            str(tmp_path / "train.csv"),
+        )
+
+
+def test_read_dvc_metadata_rejects_path_mismatch(tmp_path):
+    metadata_path = tmp_path / "train.csv.dvc"
+    metadata_path.write_text(
+        "outs:\n- md5: abcdefabcdefabcdefabcdefabcdef01\n  hash: md5\n  path: other.csv\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="incohérent"):
+        read_dvc_metadata(
+            str(metadata_path),
+            str(tmp_path / "train.csv"),
+        )
+
+
+def test_verify_dvc_hash_accepts_a_valid_hash(tmp_path):
+    file_path = tmp_path / "train.csv"
+    content = b"date,Appliances\n2016-01-01 00:00:00,10\n"
+    file_path.write_bytes(content)
+
+    digest = hashlib.md5(content).hexdigest()
+
+    assert verify_dvc_hash(str(file_path), digest) == digest
+
+
+def test_verify_dvc_hash_rejects_a_missing_file(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        verify_dvc_hash(
+            str(tmp_path / "missing.csv"), "00000000000000000000000000000000"
+        )
+
+
+def test_verify_dvc_hash_rejects_a_mismatched_hash(tmp_path):
+    file_path = tmp_path / "train.csv"
+    file_path.write_bytes(b"date,Appliances\n2016-01-01 00:00:00,10\n")
+
+    with pytest.raises(ValueError, match="Hash DVC mismatch"):
+        verify_dvc_hash(str(file_path), "deadbeefdeadbeefdeadbeefdeadbeef")
 
 
 def test_run_experiment_does_not_require_final_test(monkeypatch):
@@ -323,6 +430,7 @@ def test_run_final_evaluation_never_promotes(monkeypatch):
             pd.DataFrame({"feature": [1.0, 2.0]}),
             pd.Series([10.0, 20.0]),
             ("2016-04-30 08:20:00", "2016-05-27 18:00:00"),
+            "082db6d3abab0442e8721d732e1db116",
         ),
     )
     monkeypatch.setattr(

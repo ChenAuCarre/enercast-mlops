@@ -5,6 +5,8 @@ from pathlib import Path
 
 import mlflow
 import pandas as pd
+import yaml
+from dvc_data.hashfile.hash import file_md5
 
 from ml.policy import evaluate_candidate, evaluate_initial_models
 from ml.preprocess import FEATURE_COLUMNS, prepare_training_data
@@ -27,26 +29,105 @@ from ml.train import (
     run_experiment,
 )
 
-TEST_PATH = "data/versions/test/final_test.csv"
+FINAL_TEST_METADATA_PATH = "data/versions/test/final_test.csv.dvc"
+FINAL_TEST_PATH = "data/versions/test/final_test.csv"
 
-DATASETS = {
+DATASET_METADATA = {
     "v1": {
-        "train_path": "data/versions/v1/train.csv",
-        "train_hash": "b2fc482fe85cd1779a0faa5f7d6de625",
+        "metadata_path": "data/versions/v1/train.csv.dvc",
+        "file": "data/versions/v1/train.csv",
     },
     "v2": {
-        "train_path": "data/versions/v2/train.csv",
-        "train_hash": "d08e0d2745ace0677a6330d8cc20795a",
+        "metadata_path": "data/versions/v2/train.csv.dvc",
+        "file": "data/versions/v2/train.csv",
     },
 }
-
-TEST_HASH = "082db6d3abab0442e8721d732e1db116"
 
 
 def _period(frame):
     """Retourne la période couverte par un jeu de données (début, fin)."""
     dates = pd.to_datetime(frame["date"])
     return str(dates.min()), str(dates.max())
+
+
+def verify_dvc_hash(path, expected_hash):
+    """Vérifie le checksum DVC (MD5) d'un fichier versionné avant toute utilisation.
+
+    Les fichiers versionnés par DVC sont consommés par le pipeline : avant de
+    les lire pour entraîner ou évaluer, on reconstruit le checksum attendu et
+    on refuse toute exécution en cas de divergence.
+    """
+    file_path = Path(path)
+
+    if not file_path.exists():
+        raise FileNotFoundError(f"Fichier versionné introuvable : {path}")
+
+    actual_hash = file_md5(str(file_path))
+
+    if actual_hash != expected_hash:
+        raise ValueError(
+            f"Hash DVC mismatch for {path}: expected {expected_hash}, got {actual_hash}. "
+            "Le fichier a changé depuis le versionnement DVC ; aucune exécution n'est "
+            "permise tant que le checksum ne correspond pas."
+        )
+
+    return actual_hash
+
+
+def read_dvc_metadata(metadata_path, expected_path):
+    """Lit le checksum MD5 et le chemin de sortie depuis les métadonnées DVC.
+
+    Le fichier de métadonnées (format YAML produit par DVC) contient une clé
+    ``outs`` listant les sorties. On attend exactement une sortie, avec un
+    checksum ``md5`` : les valeurs y sont la source de vérité du versionnement.
+    Le chemin déclaré doit correspondre au fichier attendu.
+    """
+    metadata_file = Path(metadata_path)
+
+    if not metadata_file.exists():
+        raise FileNotFoundError(f"Métadonnées DVC introuvables : {metadata_path}")
+
+    with metadata_file.open(encoding="utf-8") as stream:
+        metadata = yaml.safe_load(stream) or {}
+
+    outs = metadata.get("outs") or []
+
+    if len(outs) != 1:
+        raise ValueError(
+            f"Métadonnées DVC invalides pour {metadata_path} : "
+            f"attendu un seul 'outs', trouvé {len(outs)}."
+        )
+
+    out = outs[0]
+    algorithm = out.get("hash") or "md5"
+    checksum = out.get("md5")
+
+    if algorithm != "md5" or not checksum:
+        raise ValueError(
+            f"Métadonnées DVC invalides pour {metadata_path} : "
+            f"checksum MD5 attendu, obtenu hash={algorithm!r} md5={checksum!r}."
+        )
+
+    declared_path = out.get("path")
+
+    if not declared_path:
+        raise ValueError(
+            f"Métadonnées DVC invalides pour {metadata_path} : chemin de sortie absent."
+        )
+
+    declared_file = (
+        Path(declared_path)
+        if Path(declared_path).is_absolute()
+        else metadata_file.parent / declared_path
+    )
+
+    if declared_file != Path(expected_path):
+        raise ValueError(
+            f"Chemin de sortie incohérent dans les métadonnées de {metadata_path} : "
+            f"attendu {expected_path}, déclaré {declared_file}."
+        )
+
+    return str(declared_file), checksum
 
 
 def load_data(dataset_version):
@@ -57,9 +138,16 @@ def load_data(dataset_version):
     il ne doit jamais consulter ``final_test``. L'évaluation finale passe
     exclusivement par :func:`run_final_evaluation`.
     """
-    dataset = DATASETS[dataset_version]
+    dataset_metadata = DATASET_METADATA[dataset_version]
 
-    train_df, validation_df = load_train_validation(dataset["train_path"])
+    train_path, train_hash = read_dvc_metadata(
+        dataset_metadata["metadata_path"],
+        dataset_metadata["file"],
+    )
+
+    verify_dvc_hash(train_path, train_hash)
+
+    train_df, validation_df = load_train_validation(train_path)
 
     X_train, y_train = prepare_training_data(train_df)
     X_validation, y_validation = prepare_training_data(validation_df)
@@ -74,7 +162,7 @@ def load_data(dataset_version):
 
     return {
         "dataset_version": dataset_version,
-        "train_dvc_hash": dataset["train_hash"],
+        "train_dvc_hash": train_hash,
         "validation_fraction": VALIDATION_FRACTION,
         "X_train": X_train,
         "y_train": y_train,
@@ -92,7 +180,14 @@ def load_final_test_data():
     après la sélection du modèle. Elle n'est appelée par aucun chemin de
     promotion ni de Continuous Training.
     """
-    test_df = load_final_test(TEST_PATH)
+    final_test_path, final_test_hash = read_dvc_metadata(
+        FINAL_TEST_METADATA_PATH,
+        FINAL_TEST_PATH,
+    )
+
+    verify_dvc_hash(final_test_path, final_test_hash)
+
+    test_df = load_final_test(final_test_path)
     X_test, y_test = prepare_training_data(test_df)
 
     if list(X_test.columns) != FEATURE_COLUMNS:
@@ -100,7 +195,7 @@ def load_final_test_data():
             "Les colonnes du test final ne correspondent pas au schéma attendu."
         )
 
-    return X_test, y_test, _period(test_df)
+    return X_test, y_test, _period(test_df), final_test_hash
 
 
 def run_v1(force=False):
@@ -270,7 +365,7 @@ def run_final_evaluation(dataset_version="v2"):
     champion = get_champion()
     champion_model = load_champion_model()
 
-    X_test, y_test, test_period = load_final_test_data()
+    X_test, y_test, test_period, final_test_hash = load_final_test_data()
 
     predictions, metrics = evaluate_model(champion_model, X_test, y_test)
 
@@ -287,7 +382,7 @@ def run_final_evaluation(dataset_version="v2"):
             {
                 "dataset_version": dataset_version,
                 "evaluated_model_version": champion.version,
-                "test_dvc_hash": TEST_HASH,
+                "test_dvc_hash": final_test_hash,
                 "test_rows": len(X_test),
                 "test_period_start": test_period[0],
                 "test_period_end": test_period[1],
