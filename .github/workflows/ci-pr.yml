@@ -23,6 +23,16 @@ jobs:
       - uses: actions/checkout@v7
       - uses: raven-actions/actionlint@v2
 
+  secrets-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # scan every commit in the PR, not just the tip
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -46,7 +56,7 @@ jobs:
   # Single required check for branch protection; add new jobs to `needs`.
   ci-pass:
     if: always()
-    needs: [lockfile, actionlint, lint, pr-title]
+    needs: [lockfile, actionlint, secrets-scan, lint, pr-title]
     runs-on: ubuntu-latest
     steps:
       - run: |
