@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 
-
 FEATURE_COLUMNS = [
     "lights",
     "T1", "RH_1",
@@ -91,6 +90,7 @@ def preprocess_features(df: pd.DataFrame) -> pd.DataFrame:
     if not np.isfinite(values).all():
         raise ValueError("Features contain missing or non-finite values")
 
+    X = X.astype("float64")
     return X
 
 

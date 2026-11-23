@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pandas as pd
 
-
 RAW_DATA_PATH = Path("data/raw/energydata_complete.csv")
 
 V1_OUTPUT_PATH = Path("data/versions/v1/train.csv")
