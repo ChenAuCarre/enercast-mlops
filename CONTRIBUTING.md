@@ -41,6 +41,17 @@ Required variables:
 
 **Never expose secrets** in commits, logs, notebook outputs, screenshots, issues, or PR descriptions. If a secret leaks, rotate it immediately.
 
+### DVC Remote
+
+Datasets are versioned with DVC and stored on DagsHub. To download them, store DagsHub credentials in the gitignored `.dvc/config.local` (never in the committed `.dvc/config`), then pull:
+
+```bash
+uv run dvc remote modify origin --local auth basic
+uv run dvc remote modify origin --local user <dagshub-username>
+uv run dvc remote modify origin --local password <dagshub-token>
+uv run dvc pull  # fetches the tracked datasets
+```
+
 ---
 
 ## 2. Git Branching & Pull Request Workflow
