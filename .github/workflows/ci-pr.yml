@@ -1,0 +1,63 @@
+name: ci-pr
+
+on:
+  pull_request:
+    branches: [dev, staging, main]
+    types: [opened, synchronize, reopened, edited]  # edited: re-check PR title
+
+concurrency:
+  group: ci-pr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.4.0
+      - run: uv lock --check
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: raven-actions/actionlint@v2
+
+  secrets-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # scan every commit in the PR, not just the tip
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.4.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --only-group dev
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  pr-title:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Single required check for branch protection; add new jobs to `needs`.
+  ci-pass:
+    if: always()
+    needs: [lockfile, actionlint, secrets-scan, lint, pr-title]
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "false" ]
