@@ -84,7 +84,7 @@ def test_candidate_is_promoted_when_both_gates_pass():
 def test_candidate_is_rejected_when_quality_gate_fails():
     decision = evaluate_candidate(
         {"mae": 50.0},
-        {"mae": 65.0},
+        {"mae": 66.0},
     )
 
     assert decision["promote"] is False

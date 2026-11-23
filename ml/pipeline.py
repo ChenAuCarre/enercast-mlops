@@ -99,8 +99,9 @@ def run_v2():
     )
 
     candidate_configs = {
-        "candidate-hist-gradient-boosting-v2":
-            MODELS["candidate-hist-gradient-boosting-v2"],
+        "candidate-hist-gradient-boosting-v2": MODELS[
+            "candidate-hist-gradient-boosting-v2"
+        ],
     }
 
     results = {}
@@ -136,15 +137,17 @@ def run_v2():
         print("Decision:", decisions[run_name])
 
     eligible = [
-        run_name
-        for run_name, decision in decisions.items()
-        if decision["promote"]
+        run_name for run_name, decision in decisions.items() if decision["promote"]
     ]
 
-    selected_name = min(
-        eligible,
-        key=lambda name: results[name]["metrics"]["mae"],
-    ) if eligible else None
+    selected_name = (
+        min(
+            eligible,
+            key=lambda name: results[name]["metrics"]["mae"],
+        )
+        if eligible
+        else None
+    )
 
     with mlflow.start_run(run_name="ct-decision-v2"):
         mlflow.log_params(
@@ -155,33 +158,34 @@ def run_v2():
             }
         )
 
-        mlflow.log_metrics({
-            "champion_mae": champion_metrics["mae"],
-            **{
-                f"{name}_mae": result["metrics"]["mae"]
-                for name, result in results.items()
-            },
-        })
+        mlflow.log_metrics(
+            {
+                "champion_mae": champion_metrics["mae"],
+                **{
+                    f"{name}_mae": result["metrics"]["mae"]
+                    for name, result in results.items()
+                },
+            }
+        )
 
-        mlflow.set_tags({
-            "promotion_decision": str(selected_name is not None),
-            "selected_candidate": selected_name or "none",
-            "decision_reason": (
-                decisions[selected_name]["reason"]
-                if selected_name
-                else "No candidate passed the promotion policy."
-            ),
-        })
+        mlflow.set_tags(
+            {
+                "promotion_decision": str(selected_name is not None),
+                "selected_candidate": selected_name or "none",
+                "decision_reason": (
+                    decisions[selected_name]["reason"]
+                    if selected_name
+                    else "No candidate passed the promotion policy."
+                ),
+            }
+        )
 
     if selected_name:
         selected_result = results[selected_name]
         registered = register_model(selected_result["model_id"])
         champion = promote_model(registered.version)
 
-        print(
-            f"\nNew champion: {selected_name}, "
-            f"version {champion.version}"
-        )
+        print(f"\nNew champion: {selected_name}, version {champion.version}")
     else:
         print(
             "\nNo candidate passed. "
