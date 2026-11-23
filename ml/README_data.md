@@ -90,4 +90,6 @@ The final test partition remains unchanged across both dataset versions to ensur
 
 The Git commit identifiers corresponding to each dataset snapshot will be recorded after committing the DVC pointer files.
 
-The combination of Git commit identifiers and DVC content hashes allows each experiment to be associated with its exact dataset version.
+The Git commit containing the dataset snapshot pointers and metadata is:
+- Commit: `ac07620abb924c56d2ef32183cd6fec055d1f01a`
+- Branch: `feature/mlops-pipeline`
