@@ -17,6 +17,12 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv lock --check
 
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: raven-actions/actionlint@v2
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -40,7 +46,7 @@ jobs:
   # Single required check for branch protection; add new jobs to `needs`.
   ci-pass:
     if: always()
-    needs: [lockfile, lint, pr-title]
+    needs: [lockfile, actionlint, lint, pr-title]
     runs-on: ubuntu-latest
     steps:
       - run: |
