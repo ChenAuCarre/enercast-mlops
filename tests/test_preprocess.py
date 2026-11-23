@@ -10,37 +10,39 @@ from ml.preprocess import (
 
 @pytest.fixture
 def raw_data():
-    return pd.DataFrame({
-        "date": ["2016-01-11 17:00:00", "2016-01-11 17:10:00"],
-        "Appliances": [60, 70],
-        "lights": [10, 20],
-        "T1": [20.0, 20.1],
-        "RH_1": [30.0, 31.0],
-        "T2": [19.0, 19.1],
-        "RH_2": [40.0, 41.0],
-        "T3": [21.0, 21.1],
-        "RH_3": [35.0, 36.0],
-        "T4": [20.0, 20.1],
-        "RH_4": [32.0, 33.0],
-        "T5": [19.0, 19.1],
-        "RH_5": [45.0, 46.0],
-        "T6": [18.0, 18.1],
-        "RH_6": [50.0, 51.0],
-        "T7": [20.0, 20.1],
-        "RH_7": [35.0, 36.0],
-        "T8": [22.0, 22.1],
-        "RH_8": [40.0, 41.0],
-        "T9": [19.0, 19.1],
-        "RH_9": [45.0, 46.0],
-        "T_out": [10.0, 10.1],
-        "Press_mm_hg": [760.0, 760.1],
-        "RH_out": [60.0, 61.0],
-        "Windspeed": [2.0, 2.1],
-        "Visibility": [40.0, 40.1],
-        "Tdewpoint": [5.0, 5.1],
-        "rv1": [0.1, 0.2],
-        "rv2": [0.3, 0.4],
-    })
+    return pd.DataFrame(
+        {
+            "date": ["2016-01-11 17:00:00", "2016-01-11 17:10:00"],
+            "Appliances": [60, 70],
+            "lights": [10, 20],
+            "T1": [20.0, 20.1],
+            "RH_1": [30.0, 31.0],
+            "T2": [19.0, 19.1],
+            "RH_2": [40.0, 41.0],
+            "T3": [21.0, 21.1],
+            "RH_3": [35.0, 36.0],
+            "T4": [20.0, 20.1],
+            "RH_4": [32.0, 33.0],
+            "T5": [19.0, 19.1],
+            "RH_5": [45.0, 46.0],
+            "T6": [18.0, 18.1],
+            "RH_6": [50.0, 51.0],
+            "T7": [20.0, 20.1],
+            "RH_7": [35.0, 36.0],
+            "T8": [22.0, 22.1],
+            "RH_8": [40.0, 41.0],
+            "T9": [19.0, 19.1],
+            "RH_9": [45.0, 46.0],
+            "T_out": [10.0, 10.1],
+            "Press_mm_hg": [760.0, 760.1],
+            "RH_out": [60.0, 61.0],
+            "Windspeed": [2.0, 2.1],
+            "Visibility": [40.0, 40.1],
+            "Tdewpoint": [5.0, 5.1],
+            "rv1": [0.1, 0.2],
+            "rv2": [0.3, 0.4],
+        }
+    )
 
 
 def test_feature_count_and_order(raw_data):
@@ -63,10 +65,12 @@ def test_uci_and_api_column_names_are_equivalent(raw_data):
 
     api_data = raw_data.drop(
         columns=["T_out", "Press_mm_hg", "Appliances", "rv1", "rv2"]
-    ).rename(columns={
-        "T_out": "To",
-        "Press_mm_hg": "Pressure",
-    })
+    ).rename(
+        columns={
+            "T_out": "To",
+            "Press_mm_hg": "Pressure",
+        }
+    )
 
     # Recreate the API input with the expected names.
     api_data["To"] = raw_data["T_out"]

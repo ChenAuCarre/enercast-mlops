@@ -16,9 +16,7 @@ def main():
     df = pd.read_csv(RAW_DATA_PATH)
 
     if df.shape[1] != EXPECTED_COLUMNS:
-        raise ValueError(
-            f"Expected {EXPECTED_COLUMNS} columns, found {df.shape[1]}"
-        )
+        raise ValueError(f"Expected {EXPECTED_COLUMNS} columns, found {df.shape[1]}")
 
     if "date" not in df.columns or "Appliances" not in df.columns:
         raise ValueError("Required columns 'date' and 'Appliances' are missing")

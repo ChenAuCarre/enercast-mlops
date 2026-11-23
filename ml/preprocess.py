@@ -3,15 +3,24 @@ import pandas as pd
 
 FEATURE_COLUMNS = [
     "lights",
-    "T1", "RH_1",
-    "T2", "RH_2",
-    "T3", "RH_3",
-    "T4", "RH_4",
-    "T5", "RH_5",
-    "T6", "RH_6",
-    "T7", "RH_7",
-    "T8", "RH_8",
-    "T9", "RH_9",
+    "T1",
+    "RH_1",
+    "T2",
+    "RH_2",
+    "T3",
+    "RH_3",
+    "T4",
+    "RH_4",
+    "T5",
+    "RH_5",
+    "T6",
+    "RH_6",
+    "T7",
+    "RH_7",
+    "T8",
+    "RH_8",
+    "T9",
+    "RH_9",
     "To",
     "Pressure",
     "RH_out",
@@ -69,14 +78,11 @@ def preprocess_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # Check that all expected model features are available.
     missing_columns = [
-        column for column in FEATURE_COLUMNS
-        if column not in data.columns
+        column for column in FEATURE_COLUMNS if column not in data.columns
     ]
 
     if missing_columns:
-        raise ValueError(
-            f"Missing required feature columns: {missing_columns}"
-        )
+        raise ValueError(f"Missing required feature columns: {missing_columns}")
 
     # Keep only the expected features and enforce a fixed order.
     X = data[FEATURE_COLUMNS].copy()
