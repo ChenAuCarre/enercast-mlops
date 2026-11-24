@@ -12,7 +12,6 @@ venv/
 # Secrets
 .env
 .env.*
-!.env.example
 
 # MLflow
 mlruns/
