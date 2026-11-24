@@ -47,6 +47,7 @@ jobs:
       # The tree tag lets cd-prod find this image after the staging -> main merge,
       # which has a new commit SHA but the same code (same tree hash).
       - name: Publish verified image
+        if: github.ref == 'refs/heads/staging'  # manual runs on other branches test only, never publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
