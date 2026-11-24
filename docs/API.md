@@ -1,6 +1,6 @@
 # API Reference (`enercast-mlops`)
 
-The inference service exposes a RESTful JSON API built with FastAPI. Upon startup (or when `/refresh` is invoked), the service queries the MLflow Model Registry, resolves the `@champion` alias to a concrete version number, and loads the corresponding model artifact into memory before accepting prediction traffic.
+The inference service exposes a RESTful JSON API built with FastAPI. Upon startup (or when `/refresh` is invoked), the service queries the MLflow Model Registry, resolves the `@champion` alias to a concrete version number, and loads the corresponding model artifact into memory. If the load fails at startup the service still starts: `/health` returns `503` and `/model-info` / `/predict` return `503` until a `/refresh` succeeds.
 
 * **Base URL**: `https://<your-deployed-service-url>`
 * **OpenAPI / Swagger UI**: `https://<your-deployed-service-url>/docs`
@@ -14,7 +14,7 @@ The inference service exposes a RESTful JSON API built with FastAPI. Upon startu
 | `GET` | `/health` | Public | Readiness probe; reports `200` only when the `@champion` model is loaded and operational. |
 | `GET` | `/model-info` | Public | Returns the resolved MLflow model name, alias, concrete version, and run metadata. |
 | `POST` | `/predict` | Public | Predicts appliance energy consumption (`Wh`) for a single 10-minute observation. |
-| `POST` | `/refresh` | Bearer / Header Token | Reloads the active `@champion` model from MLflow without container restart. |
+| `POST` | `/refresh` | `X-Refresh-Token` header | Reloads the active `@champion` model from MLflow without container restart. |
 
 ---
 
@@ -52,14 +52,16 @@ Exposes full traceability of the currently loaded production model.
 
 ```json
 {
-  "model_name": "building-energy-forecaster",
+  "model_name": "wattwise-energy-forecaster",
   "alias": "champion",
   "resolved_version": "2",
   "mlflow_run_id": "a1b2c3d4e5f67890",
   "dataset_version": "v2",
-  "loaded_at_utc": "2026-11-21T14:30:00Z"
+  "loaded_at_utc": "2026-11-21T14:30:00+00:00"
 }
 ```
+
+Returns `503` (`{"detail": "Champion model not loaded"}`) if no model is loaded.
 
 ---
 
@@ -112,27 +114,32 @@ All fields are required. Requests violating physical sensor boundaries or format
 ```json
 {
   "predicted_appliances_wh": 114.62,
-  "model_name": "building-energy-forecaster",
+  "model_name": "wattwise-energy-forecaster",
   "model_alias": "champion",
   "model_version": "2"
 }
 ```
 
-### Validation Error Response (`422 Unprocessable Entity`)
+### Error Responses
 
-Returned when inputs are malformed or physically out-of-range (e.g., `lights < 0` or `RH_1 > 100`):
+* **`503 Service Unavailable`**: no model loaded (`{"detail": "Champion model not loaded"}`).
+* **`422 Unprocessable Entity`**: inputs are malformed or physically out-of-range (e.g., `lights < 0` or `RH_1 > 100`):
 
-```json
-{
-  "detail": [
-    {
-      "loc": ["body", "RH_1"],
-      "msg": "Input should be less than or equal to 100",
-      "type": "less_than_equal"
-    }
-  ]
-}
-```
+  ```json
+  {
+    "detail": [
+      {
+        "type": "less_than_equal",
+        "loc": ["body", "RH_1"],
+        "msg": "Input should be less than or equal to 100",
+        "input": 101,
+        "ctx": {"le": 100.0}
+      }
+    ]
+  }
+  ```
+
+  A bad `date` fails with `type: "value_error"`, `loc: ["body", "date"]` and a message such as `Value error, time data 'x' does not match format '%Y-%m-%d %H:%M:%S'`.
 
 ---
 
@@ -144,6 +151,8 @@ Triggered automatically by `ct-retrain.yml` or `rollback.yml` after the `@champi
 
 * `X-Refresh-Token: <REFRESH_API_TOKEN>`
 
+> If `REFRESH_API_TOKEN` is unset, `/refresh` is disabled (always `401`) but the rest of the API still works. If the champion model fails to load at startup, `/health` returns `503` until a successful `/refresh` (needs the token) or a restart.
+
 ### Response (`200 OK`)
 
 ```json
@@ -153,3 +162,8 @@ Triggered automatically by `ct-retrain.yml` or `rollback.yml` after the `@champi
   "current_version": "2"
 }
 ```
+
+### Error Responses
+
+* **`401 Unauthorized`**: missing/wrong token, or `REFRESH_API_TOKEN` unset (`{"detail": "Invalid refresh token"}`).
+* **`502 Bad Gateway`**: the reload failed; the previously loaded model keeps serving (`{"detail": "Refresh failed; see server logs"}`).

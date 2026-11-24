@@ -9,7 +9,7 @@ This repo is a production MLOps reference, and PR history tracks each contributo
 ### Prerequisites
 * [uv](https://docs.astral.sh/uv/) (manages Python and dependencies)
 * Docker (for local container smoke testing)
-* Access to the team's DagsHub MLflow server and Azure Blob Storage DVC remote
+* Access to the team's DagsHub project (MLflow server and DVC remote)
 
 ### Installation
 
@@ -19,18 +19,38 @@ cd enercast-mlops
 uv sync  # installs the pinned Python version and all dependencies into .venv
 ```
 
-Add dependencies with `uv add <pkg>` (or `uv add --dev <pkg>`) and commit the updated `pyproject.toml` and `uv.lock`.
+Install only what a task needs:
+
+```bash
+uv sync --no-group experiment                  # tests and linting, as in CI
+uv sync --no-dev --no-group experiment         # runtime only, as in the Docker image
+```
+
+Add dependencies to the right group and commit the updated `pyproject.toml` and `uv.lock`:
+* `uv add <pkg>`: runtime, shipped in the Docker image
+* `uv add --dev <pkg>`: tests and linting
+* `uv add --group experiment <pkg>`: notebooks and training
 
 ### Environment Variables & Secrets
 
 Required variables:
 * `MLFLOW_TRACKING_URI`
 * `MLFLOW_TRACKING_USERNAME`
-* `MLFLOW_TRACKING_PASSWORD`
-* `AZURE_STORAGE_CONNECTION_STRING`
+* `MLFLOW_TRACKING_PASSWORD` (the DagsHub token, also used as the DVC remote password)
 * `REFRESH_API_TOKEN`
 
 **Never expose secrets** in commits, logs, notebook outputs, screenshots, issues, or PR descriptions. If a secret leaks, rotate it immediately.
+
+### DVC Remote
+
+Datasets are versioned with DVC and stored on DagsHub. To download them, store DagsHub credentials in the gitignored `.dvc/config.local` (never in the committed `.dvc/config`), then pull:
+
+```bash
+uv run dvc remote modify origin --local auth basic
+uv run dvc remote modify origin --local user <dagshub-username>
+uv run dvc remote modify origin --local password <dagshub-token>
+uv run dvc pull  # fetches the tracked datasets
+```
 
 ---
 
@@ -55,7 +75,7 @@ Before opening a PR, run the checks enforced by `.github/workflows/ci-pr.yml`:
 
 ```bash
 uv run ruff check app/ tests/
-uv run pytest -v --cov=app
+uv run pytest -v
 ```
 
 Tests use fixtures and an isolated mock MLflow registry, so they never touch production models. New features need tests covering:
