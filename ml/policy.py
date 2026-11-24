@@ -69,6 +69,16 @@ def evaluate_candidate(champion_metrics, candidate_metrics):
     champion_mae = float(champion_metrics["mae"])
     candidate_mae = float(candidate_metrics["mae"])
 
+    if not math.isfinite(candidate_mae) or candidate_mae < 0:
+        return {
+            "promote": False,
+            "improvement": None,
+            "reason": (
+                f"Candidate rejected: MAE={candidate_mae} is not a valid "
+                f"finite, non-negative value."
+            ),
+        }
+
     if not is_quality_acceptable(candidate_metrics):
         return {
             "promote": False,
@@ -99,3 +109,50 @@ def evaluate_candidate(champion_metrics, candidate_metrics):
         "improvement": improvement,
         "reason": (f"Candidate approved: MAE improvement={improvement:.2%}."),
     }
+
+
+class PromotionAuthorization:
+    """Typed promotion authorization issued by the promotion policy layer.
+
+    Authorizations are created only through :meth:`from_decision`, which the
+    promotion policy uses after a validated positive decision; direct
+    construction is refused.
+    """
+
+    def __new__(cls, version, reason, candidate=None):
+        raise TypeError(
+            "PromotionAuthorization must be created through the promotion "
+            "policy via PromotionAuthorization.from_decision."
+        )
+
+    def __init__(self, version, reason, candidate=None):
+        self.version = str(version)
+        self.reason = str(reason)
+        self.candidate = candidate
+
+    @classmethod
+    def from_decision(cls, decision, version, candidate=None):
+        """Build a typed authorization from a validated positive decision."""
+        if not isinstance(decision, dict) or decision.get("promote") is not True:
+            return None
+
+        reason = decision.get("reason")
+
+        if not isinstance(reason, str) or not reason.strip():
+            return None
+
+        authorization = object.__new__(cls)
+        authorization.version = str(version)
+        authorization.reason = str(reason)
+        authorization.candidate = candidate
+
+        return authorization
+
+    def authorizes(self, version, candidate):
+        """Return whether this authorization covers the promoted version."""
+        if version is None or candidate is None:
+            return False
+
+        return str(self.version) == str(version) and str(self.candidate) == str(
+            candidate
+        )

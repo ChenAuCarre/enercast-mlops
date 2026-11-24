@@ -1,4 +1,4 @@
-"""Tests of the chronological training / validation / final test split."""
+"""Tests for the chronological training / validation / final test split."""
 
 import pandas as pd
 import pytest

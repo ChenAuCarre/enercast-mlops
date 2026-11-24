@@ -1,7 +1,7 @@
-"""Tests of the promotion path.
+"""Tests for the promotion path.
 
-Two guarantees are checked: the final test is never read during
-training/promotion, and ``run_v1`` cannot overwrite a champion
+Two guarantees are verified: the final test is never read during
+training/promotion, and ``run_v1`` cannot overwrite an existing champion
 without explicit authorization.
 """
 
@@ -41,7 +41,7 @@ class FakeRun:
 
 
 class FakeMlflow:
-    """Minimal MLflow client: no network call, no mlruns file."""
+    """Minimal MLflow client: no network calls, no mlruns file."""
 
     def __init__(self):
         self.params = {}
@@ -74,7 +74,7 @@ class FakeMlflow:
 
 
 def synthetic_pool(rows=40):
-    """Small raw dataset containing all the columns expected by the model."""
+    """Small raw dataset containing all columns expected by the model."""
     dates = pd.date_range("2016-01-01", periods=rows, freq="10min")
     data = {
         "date": dates.astype(str),
@@ -86,7 +86,7 @@ def synthetic_pool(rows=40):
 
 
 def promotion_data():
-    """Training/validation data only, without final test."""
+    """Training/validation data only, without the final test."""
     pool = synthetic_pool()
     train_df, validation_df = split_train_validation(
         pool,
@@ -300,7 +300,9 @@ def test_run_v1_promotion_path_never_reads_final_test(monkeypatch):
     )
     monkeypatch.setattr(
         "ml.pipeline.promote_model",
-        lambda version: SimpleNamespace(version="1"),
+        lambda version, authorization=None, candidate=None: SimpleNamespace(
+            version="1"
+        ),
     )
     monkeypatch.setattr("ml.pipeline.mlflow", FakeMlflow())
 
@@ -353,7 +355,9 @@ def test_run_v1_force_allows_replacing_an_existing_champion(monkeypatch):
     )
     monkeypatch.setattr(
         "ml.pipeline.promote_model",
-        lambda version: SimpleNamespace(version="8"),
+        lambda version, authorization=None, candidate=None: SimpleNamespace(
+            version="8"
+        ),
     )
     monkeypatch.setattr("ml.pipeline.mlflow", FakeMlflow())
 
@@ -416,7 +420,50 @@ def test_run_v2_promotion_path_never_reads_final_test(monkeypatch):
     )
     monkeypatch.setattr(
         "ml.pipeline.promote_model",
-        lambda version: SimpleNamespace(version="2"),
+        lambda version, authorization=None, candidate=None: SimpleNamespace(
+            version="2"
+        ),
+    )
+    monkeypatch.setattr("ml.pipeline.mlflow", FakeMlflow())
+
+    run_v2()
+
+
+def test_run_v2_does_not_promote_when_no_candidate_passed(monkeypatch):
+    monkeypatch.setattr("ml.pipeline.load_final_test", forbid_final_test_read)
+    monkeypatch.setattr("ml.pipeline.load_data", lambda version: promotion_data())
+    monkeypatch.setattr(
+        "ml.pipeline.get_champion",
+        lambda: SimpleNamespace(version="1"),
+    )
+    monkeypatch.setattr("ml.pipeline.load_champion_model", lambda: object())
+    monkeypatch.setattr(
+        "ml.pipeline.evaluate_model",
+        lambda model, X, y: (None, {"mae": 50.0, "rmse": 60.0, "r2": 0.3}),
+    )
+    monkeypatch.setattr(
+        "ml.pipeline.run_experiment",
+        lambda *args, **kwargs: {
+            "model_id": "model-2",
+            "run_id": "run-2",
+            "metrics": {"mae": 40.0, "rmse": 50.0, "r2": 0.5},
+        },
+    )
+    monkeypatch.setattr(
+        "ml.pipeline.evaluate_candidate",
+        lambda champion, candidate: {
+            "promote": False,
+            "improvement": None,
+            "reason": "No candidate passed the promotion policy.",
+        },
+    )
+    monkeypatch.setattr(
+        "ml.pipeline.register_model",
+        forbid_promotion,
+    )
+    monkeypatch.setattr(
+        "ml.pipeline.promote_model",
+        forbid_promotion,
     )
     monkeypatch.setattr("ml.pipeline.mlflow", FakeMlflow())
 

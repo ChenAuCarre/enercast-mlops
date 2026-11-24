@@ -8,7 +8,11 @@ import mlflow
 import pandas as pd
 import yaml
 
-from ml.policy import evaluate_candidate, evaluate_initial_models
+from ml.policy import (
+    PromotionAuthorization,
+    evaluate_candidate,
+    evaluate_initial_models,
+)
 from ml.preprocess import FEATURE_COLUMNS, prepare_training_data
 from ml.registry import (
     NoChampionRegistered,
@@ -51,11 +55,10 @@ def _period(frame):
 
 
 def verify_dvc_hash(path, expected_hash):
-    """Verify the DVC (MD5) checksum of a versioned file before any use.
+    """Verify the DVC checksum (MD5) of a versioned file before any use.
 
-    DVC-versioned files are consumed by the pipeline: before reading them
-    to train or evaluate, the expected checksum is rebuilt and
-    any run is refused if it differs.
+    Versioned files consumed by the pipeline are hashed before being read for
+    training or evaluation, and any divergence aborts the run.
     """
     file_path = Path(path)
 
@@ -79,10 +82,10 @@ def verify_dvc_hash(path, expected_hash):
 def read_dvc_metadata(metadata_path, expected_path):
     """Read the MD5 checksum and output path from the DVC metadata.
 
-    The metadata file (YAML produced by DVC) contains an ``outs`` key
-    listing the outputs. Exactly one output is expected, with an
-    ``md5`` checksum: the values there are the source of truth for versioning.
-    The declared path must match the expected file.
+    The metadata file (YAML format produced by DVC) contains an ``outs`` key
+    listing the outputs. Exactly one output is expected, with an ``md5`` checksum:
+    these values are the source of truth for versioning. The declared path must
+    match the expected file.
     """
     metadata_file = Path(metadata_path)
 
@@ -133,12 +136,11 @@ def read_dvc_metadata(metadata_path, expected_path):
 
 
 def load_data(dataset_version):
-    """Load training and validation for a training cycle.
+    """Load training and validation data for a training cycle.
 
     The final test is deliberately not read here. This path is used for
-    training, champion/candidate comparison and promotion:
-    it must never access ``final_test``. The final evaluation goes through
-    exclusivement par :func:`run_final_evaluation`.
+    training, champion comparison and promotion: it must never consult
+    ``final_test``. Final evaluation goes through :func:`run_final_evaluation`.
     """
     dataset_metadata = DATASET_METADATA[dataset_version]
 
@@ -175,9 +177,9 @@ def load_data(dataset_version):
 def load_final_test_data():
     """Load the final test set.
 
-    This function is reserved for the independent final evaluation, run
-    after model selection. It is called by no promotion or
-    Continuous Training path.
+    This function is reserved for independent final evaluation, run after
+    model selection. It must not be called by any promotion or continuous
+    training path.
     """
     final_test_path, final_test_hash = read_dvc_metadata(
         FINAL_TEST_METADATA_PATH,
@@ -196,13 +198,12 @@ def load_final_test_data():
 
 
 def run_v1(force=False):
-    """Initial training (v1), then promotion of the reference model.
+    """Initial training (v1), then promote the reference model.
 
-    By default, refuses to run if a champion already exists: rerunning
-    v1 would move the ``champion`` alias to the v1 baseline and overwrite a
-    more recent champion (typically the v2 candidate). The flag
-    ``force=True`` (CLI : ``--force-initial-training``) autorise
-    explicitly allows this overwrite.
+    By default, refuse to run if a champion already exists: re-running v1
+    would move the ``champion`` alias to the v1 baseline and overwrite a newer
+    champion (typically the v2 candidate). The ``force=True`` flag
+    (CLI: ``--force-initial-training``) explicitly allows this overwrite.
     """
     print("\n=== INITIAL TRAINING: VERSION 1 ===")
 
@@ -237,7 +238,16 @@ def run_v1(force=False):
         raise RuntimeError(decision["reason"])
 
     registered = register_model(result["model_id"])
-    champion = promote_model(registered.version)
+    authorization = PromotionAuthorization.from_decision(
+        decision,
+        registered.version,
+        candidate=run_name,
+    )
+    champion = promote_model(
+        registered.version,
+        authorization=authorization,
+        candidate=run_name,
+    )
 
     print(f"\nInitial champion: version {champion.version}")
 
@@ -339,7 +349,16 @@ def run_v2():
     if selected_name:
         selected_result = results[selected_name]
         registered = register_model(selected_result["model_id"])
-        champion = promote_model(registered.version)
+        authorization = PromotionAuthorization.from_decision(
+            decisions[selected_name],
+            registered.version,
+            candidate=selected_name,
+        )
+        champion = promote_model(
+            registered.version,
+            authorization=authorization,
+            candidate=selected_name,
+        )
 
         print(f"\nNew champion: {selected_name}, version {champion.version}")
     else:
@@ -352,10 +371,9 @@ def run_v2():
 def run_final_evaluation(dataset_version="v2"):
     """Evaluate the current champion on the final test.
 
-    This path is strictly separate from training and promotion:
-    it modifies neither the champion nor the registry. It is meant to be run
-    manually after model selection, to produce the
-    rapport.
+    This path is strictly separated from training and promotion: it does not
+    modify the champion or the registry. It must be run manually after model
+    selection, to produce the report score.
     """
     print("\n=== FINAL EVALUATION (REPORTING ONLY) ===")
 

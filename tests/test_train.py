@@ -1,7 +1,7 @@
-"""Tests of estimator instantiation in ``ml.train``.
+"""Tests for estimator instantiation in ``ml.train``.
 
-sklearn estimators are mutable: each run must have its own
-instance, provided by :func:`build_estimator`.
+The sklearn estimators are mutable: each run must get a dedicated instance,
+provided by :func:`build_estimator`.
 """
 
 import subprocess

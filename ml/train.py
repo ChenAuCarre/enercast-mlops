@@ -40,9 +40,9 @@ MODELS = {
 def build_estimator(model_type: str, params: dict | None = None):
     """Instantiate a fresh estimator on each call.
 
-    sklearn estimators are mutable: the same object reused across two
-    runs would be reused after ``fit`` (state kept), skewing scores.
-    Each experiment must therefore have its own instance.
+    The sklearn estimators are mutable: the same object reused across runs
+    would be reused after ``fit`` (state kept), skewing the scores. Each
+    experiment must therefore get its own dedicated instance.
     """
     if model_type == "LinearRegression":
         return LinearRegression()
@@ -54,7 +54,7 @@ def build_estimator(model_type: str, params: dict | None = None):
 
 
 def get_git_commit():
-    """Return the current Git commit hash, or 'unknown' if Git is unavailable."""
+    """Return the Git commit hash, or "unknown" if Git is unavailable."""
     try:
         return subprocess.check_output(
             ["git", "rev-parse", "HEAD"],
@@ -65,7 +65,7 @@ def get_git_commit():
 
 
 def is_git_dirty():
-    """Return 'true'/'false' for uncommitted changes, or 'unknown' if Git is unavailable."""
+    """Indicate whether the working tree contains uncommitted modifications."""
     try:
         status_output = subprocess.check_output(
             ["git", "status", "--porcelain"],
@@ -92,11 +92,11 @@ def evaluate_model(model, X_eval, y_eval):
 
 
 def run_experiment(run_name, config, data):
-    """Train a model and log the experiment in MLflow.
+    """Train a model and log the experiment to MLflow.
 
-    Only training and validation are used here. The final test set
-    is neither read nor evaluated: it remains reserved for the independent final
-    evaluation (`python -m ml.pipeline --final-evaluation`).
+    Only training and validation are used here. The final test is neither
+    read nor evaluated: it remains reserved for independent final evaluation
+    (`python -m ml.pipeline --final-evaluation`).
     """
     model = build_estimator(config["model_type"], config.get("params"))
     dataset_version = data["dataset_version"]
