@@ -28,3 +28,6 @@ experiment = [
 
 [tool.uv]
 default-groups = ["dev", "experiment"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
