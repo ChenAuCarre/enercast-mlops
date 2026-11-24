@@ -6,7 +6,7 @@ DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
 def _bounds(lo=None, hi=None):
-    return {"ge": lo, "le": hi}
+    return {k: v for k, v in (("ge", lo), ("le", hi)) if v is not None}
 
 
 _FIELDS = {"lights": _bounds(0)}
