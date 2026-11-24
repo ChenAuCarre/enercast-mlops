@@ -1,6 +1,9 @@
+from types import SimpleNamespace
+
+import pytest
 from fastapi.testclient import TestClient
 
-from app import config, main
+from app import config, main, model
 
 PAYLOAD = {
     "date": "2016-05-15 19:30:00",
@@ -22,35 +25,43 @@ class FakeModel:
         return [114.617]
 
 
-def client(loaded=True):
-    main.holder.model = FakeModel() if loaded else None
-    main.holder.info = (
-        {"model_name": "m", "alias": "champion", "resolved_version": "2"}
-        if loaded
-        else None
-    )
-    main.holder.load = lambda: None  # skip MLflow in lifespan
-    return TestClient(main.app)
+@pytest.fixture
+def client(monkeypatch):
+    """Factory: client(loaded=True) -> TestClient; all patches undone per test."""
+
+    def make(loaded=True):
+        monkeypatch.setattr(main.holder, "model", FakeModel() if loaded else None)
+        monkeypatch.setattr(
+            main.holder,
+            "info",
+            {"model_name": "m", "alias": "champion", "resolved_version": "2"}
+            if loaded
+            else None,
+        )
+        monkeypatch.setattr(main.holder, "load", lambda: None)  # skip MLflow
+        return TestClient(main.app)
+
+    return make
 
 
-def test_predict_ok():
+def test_predict_ok(client):
     with client() as c:
         r = c.post("/predict", json=PAYLOAD)
     assert r.status_code == 200 and r.json()["predicted_appliances_wh"] == 114.62
 
 
-def test_predict_out_of_range_and_bad_date():
+def test_predict_out_of_range_and_bad_date(client):
     with client() as c:
         assert c.post("/predict", json={**PAYLOAD, "RH_1": 101}).status_code == 422
         assert c.post("/predict", json={**PAYLOAD, "date": "nope"}).status_code == 422
 
 
-def test_health_503_without_model():
+def test_health_503_without_model(client):
     with client(loaded=False) as c:
         assert c.get("/health").status_code == 503
 
 
-def test_refresh_auth(monkeypatch):
+def test_refresh_auth(client, monkeypatch):
     monkeypatch.setattr(config, "REFRESH_API_TOKEN", "s3cret")
     with client() as c:
         assert c.post("/refresh").status_code == 401
@@ -59,20 +70,59 @@ def test_refresh_auth(monkeypatch):
         )
 
 
-def test_refresh_failure_keeps_old_model(monkeypatch):
+def test_refresh_failure_keeps_old_model(client, monkeypatch):
     monkeypatch.setattr(config, "REFRESH_API_TOKEN", "s3cret")
     with client() as c:
 
         def boom():
             raise RuntimeError("mlflow down")
 
-        main.holder.load = boom
+        monkeypatch.setattr(main.holder, "load", boom)
         r = c.post("/refresh", headers={"X-Refresh-Token": "s3cret"})
         assert r.status_code == 502
         assert c.post("/predict", json=PAYLOAD).status_code == 200
 
 
-def test_root_redirects_to_docs():
+def test_root_redirects_to_docs(client):
     with client() as c:
         r = c.get("/", follow_redirects=False)
     assert r.status_code == 307 and r.headers["location"] == "/docs"
+
+
+def test_refresh_disabled_without_token(client, monkeypatch):
+    monkeypatch.setattr(config, "REFRESH_API_TOKEN", "")
+    with client() as c:
+        assert c.post("/refresh", headers={"X-Refresh-Token": ""}).status_code == 401
+
+
+def test_model_info_and_503(client):
+    with client() as c:
+        assert c.get("/model-info").json()["alias"] == "champion"
+    with client(loaded=False) as c:
+        assert c.get("/model-info").status_code == 503
+        assert c.post("/predict", json=PAYLOAD).status_code == 503
+
+
+def test_holder_load_keeps_old_model_on_failure(monkeypatch):
+    h = model.ChampionHolder()
+    h.model, h.info = "old", {"resolved_version": "1"}
+
+    def boom():
+        raise RuntimeError("no champion")
+
+    monkeypatch.setattr(model.registry, "get_champion", boom)
+    with pytest.raises(RuntimeError):
+        h.load()
+    assert h.model == "old" and h.version == "1"
+
+
+def test_holder_load_swaps_model(monkeypatch):
+    mv = SimpleNamespace(version=3, run_id="r")
+    monkeypatch.setattr(model.registry, "get_champion", lambda: mv)
+    monkeypatch.setattr(model.registry, "load_model_version", lambda v: "new")
+    run = SimpleNamespace(data=SimpleNamespace(params={"dataset_version": "v2"}))
+    monkeypatch.setattr(model.mlflow, "get_run", lambda rid: run)
+    h = model.ChampionHolder()
+    h.load()
+    assert h.model == "new" and h.version == "3"
+    assert h.info["dataset_version"] == "v2"
