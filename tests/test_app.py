@@ -57,3 +57,16 @@ def test_refresh_auth(monkeypatch):
         assert (
             c.post("/refresh", headers={"X-Refresh-Token": "s3cret"}).status_code == 200
         )
+
+
+def test_refresh_failure_keeps_old_model(monkeypatch):
+    monkeypatch.setattr(config, "REFRESH_API_TOKEN", "s3cret")
+    with client() as c:
+
+        def boom():
+            raise RuntimeError("mlflow down")
+
+        main.holder.load = boom
+        r = c.post("/refresh", headers={"X-Refresh-Token": "s3cret"})
+        assert r.status_code == 502
+        assert c.post("/predict", json=PAYLOAD).status_code == 200
