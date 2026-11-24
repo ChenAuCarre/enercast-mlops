@@ -131,9 +131,19 @@ def no_champion():
     raise NoChampionRegistered("No champion model is registered yet.")
 
 
-def test_load_data_never_reads_final_test(monkeypatch):
-    monkeypatch.setattr("ml.pipeline.load_final_test", forbid_final_test_read)
+@pytest.fixture
+def fake_dvc_inputs(monkeypatch):
+    """Replace DVC metadata, hash check and CSV reading: no real data needed."""
+    monkeypatch.setattr(
+        "ml.pipeline.read_dvc_metadata",
+        lambda metadata_path, expected_path: ("train.csv", "b2fc482f"),
+    )
+    monkeypatch.setattr("ml.pipeline.verify_dvc_hash", lambda path, expected: expected)
     monkeypatch.setattr(pd, "read_csv", lambda *args, **kwargs: synthetic_pool())
+
+
+def test_load_data_never_reads_final_test(monkeypatch, fake_dvc_inputs):
+    monkeypatch.setattr("ml.pipeline.load_final_test", forbid_final_test_read)
 
     data = load_data("v1")
 
@@ -143,7 +153,7 @@ def test_load_data_never_reads_final_test(monkeypatch):
     assert len(data["X_validation"]) == 6
 
 
-def test_load_data_verifies_the_training_dvc_hash(monkeypatch):
+def test_load_data_verifies_the_training_dvc_hash(monkeypatch, fake_dvc_inputs):
     calls = {}
 
     def fake_verify(path, expected_hash):
@@ -155,7 +165,7 @@ def test_load_data_verifies_the_training_dvc_hash(monkeypatch):
 
     load_data("v1")
 
-    assert calls["expected_hash"] == "b2fc482fe85cd1779a0faa5f7d6de625"
+    assert calls["expected_hash"] == "b2fc482f"
 
 
 def test_read_dvc_metadata_reads_the_hash(tmp_path):
