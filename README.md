@@ -62,8 +62,8 @@ All GitHub Actions workflows live under `.github/workflows/`:
 | Workflow | Trigger | Purpose |
 | :--- | :--- | :--- |
 | **`ci-pr.yml`** | `pull_request` $\rightarrow$ `dev`, `staging`, `main` | Runs static linting, `pytest` suite (with controlled test registry), Docker build, and container smoke test. |
-| **`cd-staging.yml`** | `push` (merge) $\rightarrow$ `staging` | Validates the release candidate container and readiness endpoints in a staging environment. |
-| **`cd-prod.yml`** | `push` (merge) $\rightarrow$ `main` | Tags image with commit SHA, deploys to production, waits for `/health` readiness, and runs a live prediction smoke test. |
+| **`cd-staging.yml`** | `push` (merge) $\rightarrow$ `staging` | Builds the release candidate, smoke-tests it against the current `@champion`, and publishes the verified image to GHCR (tagged by commit SHA and tree hash). |
+| **`cd-prod.yml`** | `push` (merge) $\rightarrow$ `main` | Selects the image verified in staging (fails if none), deploys it by digest to Render, waits for the deploy to go live, and runs a live prediction + model version smoke test. |
 | **`ct-retrain.yml`** | `workflow_dispatch` (`dataset_version`) | Fetches DVC snapshot from DagsHub, validates data contract, evaluates `@champion`, trains & gates candidate, promotes if passing, and refreshes production. |
 | **`rollback.yml`** | `workflow_dispatch` (`target_version`) | Reassigns `@champion` alias to a previously approved version, refreshes/redeploys production, and verifies via live prediction. |
 
