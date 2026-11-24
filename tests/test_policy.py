@@ -99,3 +99,24 @@ def test_candidate_is_rejected_when_improvement_is_insufficient():
 
     assert decision["promote"] is False
     assert decision["improvement"] < MIN_IMPROVEMENT
+
+
+def test_candidate_is_promoted_at_exact_minimum_improvement():
+    decision = evaluate_candidate(
+        {"mae": 50.0},
+        {"mae": 49.5},
+    )
+    assert decision["promote"] is True
+    assert decision["improvement"] == pytest.approx(MIN_IMPROVEMENT)
+
+
+@pytest.mark.parametrize(
+    "champion_mae",
+    [0.0, -1.0, float("inf"), float("nan")],
+)
+def test_candidate_rejects_invalid_champion_mae(champion_mae):
+    with pytest.raises(ValueError):
+        evaluate_candidate(
+            {"mae": champion_mae},
+            {"mae": 45.0},
+        )
