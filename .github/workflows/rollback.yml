@@ -39,19 +39,12 @@ env:
 
 jobs:
   rollback:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (github.ref_name == 'dev' || github.ref_name == 'staging' || github.ref_name == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Enforce production branch
-        env:
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          if [ "$REF_NAME" != "main" ]; then
-            echo "::error::Rollback must be dispatched from main (current: ${REF_NAME})."
-            exit 1
-          fi
-
       - name: Check out the repository
         uses: actions/checkout@v7
 
@@ -61,14 +54,16 @@ jobs:
           enable-cache: true
 
       - name: Install Python dependencies
-        # A rollback only needs the runtime dependencies (MLflow client), not
-        # the experiment group (DVC, Jupyter, plotting).
+        # A rollback only needs the core runtime dependencies (MLflow client),
+        # not the experiment group (DVC, Jupyter, plotting).
         run: uv sync --frozen --no-default-groups
 
-      - name: Validate rollback inputs
+      - name: Validate rollback inputs and service secrets
         env:
           TARGET_VERSION: ${{ inputs['target-version'] }}
           REASON: ${{ inputs['reason'] }}
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          REFRESH_API_TOKEN: ${{ secrets.REFRESH_API_TOKEN }}
         run: |
           set -euo pipefail
           case "$TARGET_VERSION" in
@@ -83,6 +78,10 @@ jobs:
           fi
           if [ -z "${REASON//[[:space:]]/}" ]; then
             echo "::error::reason must contain a non-empty incident or ticket reference."
+            exit 1
+          fi
+          if [ -z "${API_BASE_URL}" ] || [ -z "${REFRESH_API_TOKEN}" ]; then
+            echo "::error::API_BASE_URL and REFRESH_API_TOKEN secrets are required to refresh and verify the live inference service during rollback."
             exit 1
           fi
 
@@ -104,8 +103,8 @@ jobs:
           try:
               print(get_champion().version)
           except NoChampionRegistered:
-              # Recovery from a missing alias is allowed: the target version
-              # still has to be approved before the alias can be set.
+              # Recovery from a missing alias is allowed: rollback_champion()
+              # still verifies that the target version is READY and approved.
               print("")
           PY
           if [ "${RC}" -ne 0 ]; then
@@ -116,60 +115,6 @@ jobs:
           VERSION="$(cat "$VERSION_FILE")"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Champion version before rollback: ${VERSION:-none}"
-
-      - name: Validate the target version is approved
-        env:
-          TARGET_VERSION: ${{ inputs['target-version'] }}
-          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-          MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
-          MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
-        run: |
-          set -euo pipefail
-          : "${MLFLOW_TRACKING_URI:?MLFLOW_TRACKING_URI secret is required}"
-          uv run --no-sync python - <<'PY'
-          import os
-          import sys
-
-          from ml.registry import CHAMPION_APPROVED_TAG, MODEL_NAME, get_client
-
-          target = os.environ["TARGET_VERSION"]
-          client = get_client()
-
-          try:
-              model_version = client.get_model_version(
-                  name=MODEL_NAME,
-                  version=target,
-              )
-              tag = client.get_model_version_tag(
-                  name=MODEL_NAME,
-                  version=target,
-                  key=CHAMPION_APPROVED_TAG,
-              )
-          except Exception as exc:  # noqa: BLE001 - report any registry read failure
-              print(f"::error::Cannot read target version {target}: {exc}")
-              sys.exit(1)
-
-          approved = str(getattr(tag, "value", tag))
-
-          print(f"Target version: {model_version.version}")
-          print(f"Target status: {model_version.status}")
-          print(f"Target run ID: {model_version.run_id}")
-          print(f"Target approved: {approved}")
-
-          if model_version.status != "READY":
-              print(
-                  f"::error::Target version {target} is not READY "
-                  f"(status={model_version.status})."
-              )
-              sys.exit(2)
-
-          if approved != "true":
-              print(
-                  f"::error::Target version {target} was not previously approved "
-                  f"(champion_approved={approved})."
-              )
-              sys.exit(3)
-          PY
 
       - name: Move champion alias to the approved target version
         id: rollback
@@ -236,32 +181,14 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Champion version after rollback: ${VERSION}"
 
-      - name: Check inference service configuration
-        id: api
-        env:
-          API_BASE_URL: ${{ secrets.API_BASE_URL }}
-          REFRESH_API_TOKEN: ${{ secrets.REFRESH_API_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -n "${API_BASE_URL}" ] && [ -n "${REFRESH_API_TOKEN}" ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-            echo "Inference service secrets are configured: live verification will run."
-            exit 0
-          fi
-          echo "available=false" >> "$GITHUB_OUTPUT"
-          echo "::warning::API_BASE_URL and/or REFRESH_API_TOKEN are not configured. The champion alias was rolled back, but the inference service was not refreshed or verified. Configure both secrets and re-run rollback.yml once the service is deployed."
-
       - name: Refresh champion in the inference service
-        if: steps.api.outputs.available == 'true'
+        id: refresh
         env:
           API_BASE_URL: ${{ secrets.API_BASE_URL }}
           REFRESH_API_TOKEN: ${{ secrets.REFRESH_API_TOKEN }}
           EXPECTED_VERSION: ${{ steps.champion_after.outputs.version }}
         run: |
           set -euo pipefail
-          : "${API_BASE_URL:?API_BASE_URL secret is required}"
-          : "${REFRESH_API_TOKEN:?REFRESH_API_TOKEN secret is required}"
-          : "${EXPECTED_VERSION:?Expected champion version is required}"
           API_BASE_URL="${API_BASE_URL%/}"
           RESPONSE_FILE="${RUNNER_TEMP}/refresh_response.json"
           curl --fail-with-body --silent --show-error \
@@ -280,7 +207,7 @@ jobs:
           fi
 
       - name: Verify restored champion version
-        if: steps.api.outputs.available == 'true'
+        id: verify
         env:
           API_BASE_URL: ${{ secrets.API_BASE_URL }}
           EXPECTED_VERSION: ${{ steps.champion_after.outputs.version }}
@@ -288,8 +215,6 @@ jobs:
           HEALTH_RETRY_DELAY_SECONDS: "15"
         run: |
           set -euo pipefail
-          : "${API_BASE_URL:?API_BASE_URL secret is required}"
-          : "${EXPECTED_VERSION:?Expected champion version is required}"
           API_BASE_URL="${API_BASE_URL%/}"
           HEALTH_FILE="${RUNNER_TEMP}/health_response.json"
           ATTEMPT=0
@@ -337,14 +262,12 @@ jobs:
           fi
 
       - name: Live prediction smoke test
-        if: steps.api.outputs.available == 'true'
+        id: smoke_test
         env:
           API_BASE_URL: ${{ secrets.API_BASE_URL }}
           EXPECTED_VERSION: ${{ steps.champion_after.outputs.version }}
         run: |
           set -euo pipefail
-          : "${API_BASE_URL:?API_BASE_URL secret is required}"
-          : "${EXPECTED_VERSION:?Expected champion version is required}"
           API_BASE_URL="${API_BASE_URL%/}"
           PAYLOAD='{"date": "2016-05-15 19:30:00", "lights": 20, "T1": 22.5, "RH_1": 41.2, "T2": 21.8, "RH_2": 40.5, "T3": 23.1, "RH_3": 39.8, "T4": 21.4, "RH_4": 38.9, "T5": 20.2, "RH_5": 48.1, "T6": 14.3, "RH_6": 62.0, "T7": 20.8, "RH_7": 37.5, "T8": 22.0, "RH_8": 42.1, "T9": 20.5, "RH_9": 41.0, "To": 13.8, "Pressure": 756.4, "RH_out": 65.0, "Windspeed": 4.2, "Visibility": 40.0, "Tdewpoint": 7.3}'
           PREDICT_FILE="${RUNNER_TEMP}/predict_response.json"
@@ -374,7 +297,7 @@ jobs:
           BEFORE: ${{ steps.champion_before.outputs.version }}
           AFTER: ${{ steps.champion_after.outputs.version }}
           REASON: ${{ inputs['reason'] }}
-          API_AVAILABLE: ${{ steps.api.outputs.available }}
+          SMOKE_OUTCOME: ${{ steps.smoke_test.outcome }}
         run: |
           SAFE_REASON="$(printf '%s' "$REASON" | tr '\n' ' ' | sed 's/|/\\|/g')"
           {
@@ -386,12 +309,12 @@ jobs:
             echo "| Champion before | ${BEFORE:-none} |"
             echo "| Champion after | ${AFTER:-unknown} |"
             echo "| Reason | ${SAFE_REASON} |"
-            if [ "${API_AVAILABLE:-false}" = "true" ]; then
+            if [ "${SMOKE_OUTCOME}" = "success" ]; then
               echo "| Inference service | Verified (refresh, health, model-info, prediction) |"
             elif [ -n "${AFTER:-}" ]; then
-              echo "| Inference service | Skipped: API_BASE_URL / REFRESH_API_TOKEN not configured |"
+              echo "| Inference service | Failed during refresh or live verification |"
             else
-              echo "| Inference service | Not reached (rollback failed) |"
+              echo "| Inference service | Not reached (rollback failed before registry update) |"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
