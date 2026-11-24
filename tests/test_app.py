@@ -126,3 +126,10 @@ def test_holder_load_swaps_model(monkeypatch):
     h.load()
     assert h.model == "new" and h.version == "3"
     assert h.info["dataset_version"] == "v2"
+
+
+def test_refresh_non_ascii_token_is_401(client, monkeypatch):
+    monkeypatch.setattr(config, "REFRESH_API_TOKEN", "s3cret")
+    with client() as c:
+        r = c.post("/refresh", headers={"X-Refresh-Token": "é".encode("latin-1")})
+    assert r.status_code == 401

@@ -71,7 +71,7 @@ def predict(req: PredictRequest):
 def refresh(x_refresh_token: str = Header(default="")):
     # Empty configured token disables the endpoint.
     if not config.REFRESH_API_TOKEN or not secrets.compare_digest(
-        x_refresh_token, config.REFRESH_API_TOKEN
+        x_refresh_token.encode(), config.REFRESH_API_TOKEN.encode()
     ):
         raise HTTPException(401, "Invalid refresh token")
     previous = holder.version
