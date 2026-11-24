@@ -94,7 +94,8 @@ def evaluate_candidate(champion_metrics, candidate_metrics):
         candidate_mae,
     )
 
-    if improvement < MIN_IMPROVEMENT:
+    # Round so an exact 1% improvement is not rejected by float error.
+    if round(improvement, 9) < MIN_IMPROVEMENT:
         return {
             "promote": False,
             "improvement": improvement,

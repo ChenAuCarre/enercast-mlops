@@ -120,3 +120,10 @@ def test_candidate_rejects_invalid_champion_mae(champion_mae):
             {"mae": champion_mae},
             {"mae": 45.0},
         )
+
+
+def test_candidate_with_float_rounded_minimum_improvement_is_promoted():
+    # (40 - 39.6) / 40 evaluates to 0.009999999999999964, not 0.01.
+    decision = evaluate_candidate({"mae": 40.0}, {"mae": 39.6})
+
+    assert decision["promote"] is True
