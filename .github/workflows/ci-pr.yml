@@ -44,6 +44,16 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
 
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.4.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --no-group experiment
+      - run: uv run pytest -q
+
   pr-title:
     runs-on: ubuntu-latest
     permissions:
@@ -56,7 +66,7 @@ jobs:
   # Single required check for branch protection; add new jobs to `needs`.
   ci-pass:
     if: always()
-    needs: [lockfile, actionlint, secrets-scan, lint, pr-title]
+    needs: [lockfile, actionlint, secrets-scan, lint, test, pr-title]
     runs-on: ubuntu-latest
     steps:
       - run: |
