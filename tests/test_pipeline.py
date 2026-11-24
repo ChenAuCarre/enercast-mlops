@@ -472,11 +472,14 @@ def test_run_v2_does_not_promote_when_no_candidate_passed(monkeypatch):
 
 def test_run_final_evaluation_never_promotes(monkeypatch):
     fake_mlflow = FakeMlflow()
+    fake_mlflow.get_run = lambda run_id: SimpleNamespace(
+        data=SimpleNamespace(params={"dataset_version": "v1"})
+    )
 
     monkeypatch.setattr("ml.pipeline.mlflow", fake_mlflow)
     monkeypatch.setattr(
         "ml.pipeline.get_champion",
-        lambda: SimpleNamespace(version="1"),
+        lambda: SimpleNamespace(version="1", run_id="run-0"),
     )
     monkeypatch.setattr("ml.pipeline.load_champion_model", lambda: object())
     monkeypatch.setattr(
@@ -498,12 +501,13 @@ def test_run_final_evaluation_never_promotes(monkeypatch):
     monkeypatch.setattr("ml.pipeline.register_model", forbid_promotion)
     monkeypatch.setattr("ml.pipeline.promote_model", forbid_promotion)
 
-    run_final_evaluation("v2")
+    run_final_evaluation()
 
     assert fake_mlflow.tags["evaluation_split"] == "final_test"
     assert fake_mlflow.tags["final_test_used_for_selection"] == "false"
     assert fake_mlflow.tags["promotion_eligible"] == "false"
     assert fake_mlflow.metrics["final_test_mae"] == 1.0
+    assert fake_mlflow.params["dataset_version"] == "v1"
 
 
 def test_final_test_loader_is_not_imported_by_promotion_helpers():

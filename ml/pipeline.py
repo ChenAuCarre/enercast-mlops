@@ -368,7 +368,7 @@ def run_v2():
         )
 
 
-def run_final_evaluation(dataset_version="v2"):
+def run_final_evaluation():
     """Evaluate the current champion on the final test.
 
     This path is strictly separated from training and promotion: it does not
@@ -381,6 +381,8 @@ def run_final_evaluation(dataset_version="v2"):
 
     champion = get_champion()
     champion_model = load_champion_model()
+    # Log the version the champion was actually trained on.
+    dataset_version = mlflow.get_run(champion.run_id).data.params["dataset_version"]
 
     X_test, y_test, test_period, final_test_hash = load_final_test_data()
 
@@ -474,12 +476,6 @@ def main():
         ),
     )
     parser.add_argument(
-        "--eval-dataset-version",
-        choices=["v1", "v2"],
-        default="v2",
-        help="Reference version logged during the final evaluation.",
-    )
-    parser.add_argument(
         "--force-initial-training",
         action="store_true",
         help=(
@@ -491,7 +487,7 @@ def main():
     args = parser.parse_args()
 
     if args.final_evaluation:
-        run_final_evaluation(args.eval_dataset_version)
+        run_final_evaluation()
         return
 
     if args.dataset_version == "v1":
