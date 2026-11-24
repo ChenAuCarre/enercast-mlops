@@ -7,7 +7,7 @@ from mlflow.exceptions import MlflowException
 
 from ml.policy import PromotionAuthorization
 
-MODEL_NAME = "wattwise-energy-forecaster-final"
+MODEL_NAME = "wattwise-energy-forecaster"
 CHAMPION_ALIAS = "champion"
 CHAMPION_APPROVED_TAG = "champion_approved"
 CHAMPION_APPROVAL_REASON_TAG = "champion_approval_reason"
