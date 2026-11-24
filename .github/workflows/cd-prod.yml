@@ -1,0 +1,91 @@
+name: cd-prod
+
+# Deploy the image verified by cd-staging (no rebuild) to Render, wait until that deploy
+# is live, then smoke-test the live URL with a real prediction and the expected version.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: cd-prod
+  cancel-in-progress: false
+
+env:
+  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+  MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+  MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.RENDER_SERVICE_URL }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select the image verified in staging
+        id: image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          tree=$(git rev-parse 'HEAD^{tree}')
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          if ! digest=$(docker buildx imagetools inspect "$image:tree-$tree" --format '{{json .Manifest}}' | jq -er .digest); then
+            echo "::error::No image for tree $tree: this code was not validated by cd-staging. Nothing deployed."
+            exit 1
+          fi
+          echo "Deploying $image@$digest (tree-$tree)"
+          echo "ref=$image@$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger Render deploy
+        id: render
+        env:
+          HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+        run: |
+          img=$(jq -rn --arg v "$IMAGE_REF" '$v|@uri')
+          deploy_id=$(curl -sf -X POST "$HOOK_URL&imgURL=$img" | jq -er .deploy.id)
+          service_id=$(sed -E 's#.*/deploy/(srv-[^?]+).*#\1#' <<<"$HOOK_URL")
+          echo "Render deploy $deploy_id on $service_id"
+          echo "deploy_id=$deploy_id" >> "$GITHUB_OUTPUT"
+          echo "service_id=$service_id" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for the deploy to go live
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SERVICE_ID: ${{ steps.render.outputs.service_id }}
+          DEPLOY_ID: ${{ steps.render.outputs.deploy_id }}
+        run: |
+          deadline=$((SECONDS + 900))
+          while ((SECONDS < deadline)); do
+            status=$(curl -sf -H "Authorization: Bearer $RENDER_API_KEY" \
+              "https://api.render.com/v1/services/$SERVICE_ID/deploys/$DEPLOY_ID" | jq -r .status)
+            echo "status: $status"
+            case "$status" in
+              live) exit 0 ;;
+              *_failed | canceled | deactivated)
+                echo "::error::Render deploy $DEPLOY_ID ended with status $status"
+                exit 1 ;;
+            esac
+            sleep 15
+          done
+          echo "::error::Render deploy $DEPLOY_ID not live after 15 min"
+          exit 1
+
+      - uses: astral-sh/setup-uv@v10.4.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --no-dev --no-group experiment
+      - name: Resolve expected @champion version
+        id: champion
+        run: echo "version=$(uv run python -c 'from ml.registry import get_champion_version; print(get_champion_version())')" >> "$GITHUB_OUTPUT"
+      - name: Live smoke test
+        env:
+          SMOKE_TIMEOUT: "300"
+        run: scripts/smoke_test.sh "${{ vars.RENDER_SERVICE_URL }}" "${{ steps.champion.outputs.version }}"
