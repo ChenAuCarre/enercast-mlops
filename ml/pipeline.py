@@ -308,7 +308,7 @@ def run_v2():
     with mlflow.start_run(run_name=decision_run_name):
         mlflow.log_params(
             {
-                "dataset_version": "v2",
+                "dataset_version": data["dataset_version"],
                 "previous_champion_version": current_champion.version,
                 "candidate_count": len(results),
                 "selection_split": "validation",
