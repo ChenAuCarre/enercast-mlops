@@ -144,6 +144,8 @@ Triggered automatically by `ct-retrain.yml` or `rollback.yml` after the `@champi
 
 * `X-Refresh-Token: <REFRESH_API_TOKEN>`
 
+> If `REFRESH_API_TOKEN` is unset, `/refresh` is disabled (always `401`) but the rest of the API still works. If the champion model fails to load at startup, `/health` returns `503` until a successful `/refresh` (needs the token) or a restart.
+
 ### Response (`200 OK`)
 
 ```json
