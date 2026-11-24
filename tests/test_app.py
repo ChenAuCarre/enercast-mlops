@@ -79,10 +79,14 @@ def test_refresh_failure_keeps_old_model(client, monkeypatch):
         assert c.post("/predict", json=PAYLOAD).status_code == 200
 
 
-def test_root_redirects_to_docs(client):
+def test_root_serves_frontend_ui(client):
     with client() as c:
-        r = c.get("/", follow_redirects=False)
-    assert r.status_code == 307 and r.headers["location"] == "/docs"
+        r = c.get("/")
+        docs = c.get("/docs")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    assert "EnerCast MLOps" in r.text
+    assert docs.status_code == 200
 
 
 def test_refresh_disabled_without_token(client, monkeypatch):
