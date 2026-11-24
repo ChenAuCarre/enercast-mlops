@@ -54,10 +54,28 @@ def build_estimator(model_type: str, params: dict | None = None):
 
 
 def get_git_commit():
-    return subprocess.check_output(
-        ["git", "rev-parse", "HEAD"],
-        text=True,
-    ).strip()
+    """Retourne le hash du commit Git courant, ou 'unknown' si Git est indisponible."""
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            text=True,
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "unknown"
+
+
+def is_git_dirty():
+    """Indique si le working tree contient des modifications non commitées."""
+    try:
+        status_output = subprocess.check_output(
+            ["git", "status", "--porcelain"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+    return bool(status_output.strip())
 
 
 def evaluate_model(model, X_eval, y_eval):
@@ -85,12 +103,15 @@ def run_experiment(run_name, config, data):
 
     with mlflow.start_run(run_name=run_name) as run:
         git_commit = get_git_commit()
+        git_dirty = is_git_dirty()
 
         mlflow.log_params(config["params"])
         mlflow.log_params(
             {
                 "dataset_version": dataset_version,
                 "train_dvc_hash": data["train_dvc_hash"],
+                "git_commit": git_commit,
+                "git_dirty": "true" if git_dirty else "false",
                 "model_type": config["model_type"],
                 "train_rows": len(data["X_train"]),
                 "validation_rows": len(data["X_validation"]),
@@ -106,6 +127,7 @@ def run_experiment(run_name, config, data):
         mlflow.set_tags(
             {
                 "git_commit": git_commit,
+                "git_dirty": "true" if git_dirty else "false",
                 "model_role": config["role"],
                 "selection_split": "validation",
                 "final_test_usage": "separate_final_evaluation",

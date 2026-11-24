@@ -22,15 +22,17 @@ from ml.registry import (
     MODEL_NAME,
     NoChampionRegistered,
     get_champion,
+    register_model,
 )
 
 
 class FakeClient:
     """Client MLflow minimal qui renvoie un résultat ou lève une erreur."""
 
-    def __init__(self, result=None, error=None):
+    def __init__(self, result=None, error=None, version=None):
         self.result = result
         self.error = error
+        self.version = version
         self.calls = []
 
     def get_model_version_by_alias(self, name, alias):
@@ -40,6 +42,14 @@ class FakeClient:
             raise self.error
 
         return self.result
+
+    def get_model_version(self, name, version):
+        self.calls.append((name, version))
+
+        if self.error is not None:
+            raise self.error
+
+        return self.version
 
 
 def install_client(monkeypatch, client):
@@ -136,3 +146,18 @@ def test_connection_error_is_propagated_unchanged(monkeypatch):
 
     with pytest.raises(ConnectionError, match="Tracking server unreachable"):
         get_champion()
+
+
+def test_failed_registration_includes_the_status_message(monkeypatch):
+    version = SimpleNamespace(
+        status="FAILED",
+        status_message="Artifact validation failed",
+    )
+    monkeypatch.setattr(
+        "ml.registry.mlflow.register_model",
+        lambda **kwargs: SimpleNamespace(version="9"),
+    )
+    install_client(monkeypatch, FakeClient(version=version))
+
+    with pytest.raises(RuntimeError, match="Artifact validation failed"):
+        register_model("model-1")

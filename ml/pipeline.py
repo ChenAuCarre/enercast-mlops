@@ -303,7 +303,9 @@ def run_v2():
         else None
     )
 
-    with mlflow.start_run(run_name="ct-decision-v2"):
+    decision_run_name = f"ct-decision-{data['dataset_version']}"
+
+    with mlflow.start_run(run_name=decision_run_name):
         mlflow.log_params(
             {
                 "dataset_version": "v2",

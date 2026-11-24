@@ -99,7 +99,10 @@ def register_model(model_id, model_name=MODEL_NAME):
             return version
 
         if version.status == "FAILED":
-            raise RuntimeError(f"Model registration failed: {version.status}")
+            raise RuntimeError(
+                f"Model registration failed: {version.status} - "
+                f"{version.status_message}"
+            )
 
         time.sleep(2)
 

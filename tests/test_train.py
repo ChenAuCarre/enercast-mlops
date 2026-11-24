@@ -4,6 +4,7 @@ Les estimateurs sklearn sont mutables : chaque run doit disposer d'une
 instance dédiée, fournie par :func:`build_estimator`.
 """
 
+import subprocess
 from types import SimpleNamespace
 
 import pandas as pd
@@ -11,6 +12,8 @@ import pytest
 
 from ml.train import (
     build_estimator,
+    get_git_commit,
+    is_git_dirty,
     run_experiment,
 )
 
@@ -105,6 +108,7 @@ def test_run_experiment_instantiates_a_fresh_estimator_per_run(monkeypatch):
     fake_mlflow = FakeMlflow()
     monkeypatch.setattr("ml.train.mlflow", fake_mlflow)
     monkeypatch.setattr("ml.train.get_git_commit", lambda: "abc123")
+    monkeypatch.setattr("ml.train.is_git_dirty", lambda: True)
 
     built = []
 
@@ -130,3 +134,30 @@ def test_run_experiment_instantiates_a_fresh_estimator_per_run(monkeypatch):
     assert result["run_id"] == "run-1"
     assert result["model_id"] == "model-1"
     assert set(result["metrics"]) == {"mae", "rmse", "r2"}
+    assert fake_mlflow.tags["git_commit"] == "abc123"
+    assert fake_mlflow.tags["git_dirty"] == "true"
+    assert fake_mlflow.params["git_dirty"] == "true"
+
+
+def test_get_git_commit_falls_back_to_unknown(monkeypatch):
+    def fake_check_output(cmd, **kwargs):
+        raise subprocess.CalledProcessError(128, "git")
+
+    monkeypatch.setattr("ml.train.subprocess.check_output", fake_check_output)
+
+    assert get_git_commit() == "unknown"
+
+
+def test_is_git_dirty_returns_false_when_clean(monkeypatch):
+    monkeypatch.setattr("ml.train.subprocess.check_output", lambda cmd, **kwargs: "")
+
+    assert is_git_dirty() is False
+
+
+def test_is_git_dirty_returns_true_when_dirty(monkeypatch):
+    monkeypatch.setattr(
+        "ml.train.subprocess.check_output",
+        lambda cmd, **kwargs: " M ml/train.py\n",
+    )
+
+    assert is_git_dirty() is True
