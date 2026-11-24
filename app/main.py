@@ -81,7 +81,7 @@ def refresh(x_refresh_token: str = Header(default="")):
         holder.load()
     except Exception as exc:
         log.exception("Refresh failed; keeping previous model")
-        raise HTTPException(502, f"Refresh failed: {exc}") from exc
+        raise HTTPException(502, "Refresh failed; see server logs") from exc
     return RefreshResponse(
         status="refreshed", previous_version=previous, current_version=holder.version
     )

@@ -75,7 +75,7 @@ def test_refresh_failure_keeps_old_model(client, monkeypatch):
 
         monkeypatch.setattr(main.holder, "load", boom)
         r = c.post("/refresh", headers={"X-Refresh-Token": "s3cret"})
-        assert r.status_code == 502
+        assert r.status_code == 502 and "mlflow down" not in r.text
         assert c.post("/predict", json=PAYLOAD).status_code == 200
 
 
