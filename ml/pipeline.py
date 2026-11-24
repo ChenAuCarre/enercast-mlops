@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import tempfile
 from pathlib import Path
@@ -6,7 +7,6 @@ from pathlib import Path
 import mlflow
 import pandas as pd
 import yaml
-from dvc_data.hashfile.hash import file_md5
 
 from ml.policy import evaluate_candidate, evaluate_initial_models
 from ml.preprocess import FEATURE_COLUMNS, prepare_training_data
@@ -62,7 +62,9 @@ def verify_dvc_hash(path, expected_hash):
     if not file_path.exists():
         raise FileNotFoundError(f"Versioned file not found: {path}")
 
-    actual_hash = file_md5(str(file_path))
+    # DVC 3 "hash: md5" is the plain MD5 of the file bytes.
+    with file_path.open("rb") as stream:
+        actual_hash = hashlib.file_digest(stream, "md5").hexdigest()
 
     if actual_hash != expected_hash:
         raise ValueError(
