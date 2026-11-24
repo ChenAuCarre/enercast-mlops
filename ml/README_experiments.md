@@ -8,9 +8,10 @@ behind the production champion.
 
 - **Tracking server and model registry:** the shared, persistent MLflow server
   hosted on DagsHub.
-- **Configuration:** `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME`, and
-  `MLFLOW_TRACKING_PASSWORD` are provided as environment variables (GitHub
-  Actions secrets in the workflows).
+- **Configuration:** MLflow reads `MLFLOW_TRACKING_URI`,
+  `MLFLOW_TRACKING_USERNAME` and `MLFLOW_TRACKING_PASSWORD` from the
+  environment. In GitHub Actions, the URI and username come from repository
+  variables and the password from a repository secret.
 - **Experiment:** `WattWise-energy-forecasting-final`.
 - **Registered model:** `wattwise-energy-forecaster-final`.
 - **Champion alias:** `champion`.
@@ -250,10 +251,10 @@ In GitHub Actions:
   the loaded version with a live prediction.
 - `rollback.yml` restores a previously approved version, refreshes the service,
   and verifies it with a live prediction.
-- Both workflows read their credentials from repository-level GitHub secrets
-  (`DAGSHUB_USERNAME`, `DAGSHUB_TOKEN`, `MLFLOW_TRACKING_URI`,
-  `MLFLOW_TRACKING_USERNAME`, `MLFLOW_TRACKING_PASSWORD`, `API_BASE_URL`,
-  `REFRESH_API_TOKEN`) and share the `ct-retrain-champion-registry` concurrency
+- Both workflows read `MLFLOW_TRACKING_URI` and `MLFLOW_TRACKING_USERNAME`
+  from repository-level GitHub variables and their credentials from
+  repository-level GitHub secrets (`DAGSHUB_USERNAME`, `DAGSHUB_TOKEN`,
+  `MLFLOW_TRACKING_PASSWORD`, `API_BASE_URL`, `REFRESH_API_TOKEN`) and share the `ct-retrain-champion-registry` concurrency
   group, so they never move the alias concurrently.
 - The three inference-service steps (refresh, health/model-info verification,
   live prediction) are skipped with a warning when `API_BASE_URL` and
