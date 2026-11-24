@@ -1,0 +1,42 @@
+name: cd-staging
+
+# Validate the release candidate: build the image from the merged staging commit,
+# run it with the real registry and check it serves the current @champion.
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+
+concurrency:
+  group: cd-staging
+  cancel-in-progress: false
+
+env:
+  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+  MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+  MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+  REFRESH_API_TOKEN: ${{ secrets.REFRESH_API_TOKEN }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.4.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --no-dev --no-group experiment
+      - name: Resolve expected @champion version
+        id: champion
+        run: echo "version=$(uv run python -c 'from ml.registry import get_champion_version; print(get_champion_version())')" >> "$GITHUB_OUTPUT"
+      - run: docker build -t "enercast-api:${{ github.sha }}" .
+      - name: Start container
+        run: |
+          docker run -d --name app -p 8000:8000 \
+            -e MLFLOW_TRACKING_URI -e MLFLOW_TRACKING_USERNAME \
+            -e MLFLOW_TRACKING_PASSWORD -e REFRESH_API_TOKEN \
+            "enercast-api:${{ github.sha }}"
+      - run: scripts/smoke_test.sh http://localhost:8000 "${{ steps.champion.outputs.version }}"
+      - name: Container logs
+        if: always()
+        run: docker logs app

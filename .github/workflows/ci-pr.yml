@@ -69,21 +69,7 @@ jobs:
           docker run -d --name app -p 8000:8000 \
             -e MLFLOW_TRACKING_URI -e MLFLOW_TRACKING_USERNAME \
             -e MLFLOW_TRACKING_PASSWORD -e REFRESH_API_TOKEN enercast:ci
-          for _ in $(seq 1 30); do
-            curl -sf localhost:8000/health && break
-            sleep 4
-          done
-          curl -sf localhost:8000/health || { docker logs app; exit 1; }
-          curl -sf localhost:8000/model-info
-          curl -sf -X POST localhost:8000/predict -H 'Content-Type: application/json' -d '{
-            "date": "2016-05-15 19:30:00", "lights": 20,
-            "T1": 22.5, "RH_1": 41.2, "T2": 21.8, "RH_2": 40.5,
-            "T3": 23.1, "RH_3": 39.8, "T4": 21.4, "RH_4": 38.9,
-            "T5": 20.2, "RH_5": 48.1, "T6": 14.3, "RH_6": 62.0,
-            "T7": 20.8, "RH_7": 37.5, "T8": 22.0, "RH_8": 42.1,
-            "T9": 20.5, "RH_9": 41.0, "To": 13.8, "Pressure": 756.4,
-            "RH_out": 65.0, "Windspeed": 4.2, "Visibility": 40.0, "Tdewpoint": 7.3
-          }' | jq -e '.predicted_appliances_wh | numbers'
+          scripts/smoke_test.sh http://localhost:8000 || { docker logs app; exit 1; }
 
   pr-title:
     runs-on: ubuntu-latest
