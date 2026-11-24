@@ -29,8 +29,6 @@ class FakeModel:
 def client(monkeypatch):
     """Factory: client(loaded=True) -> TestClient; all patches undone per test."""
 
-    monkeypatch.setattr(config, "REFRESH_API_TOKEN", "s3cret")
-
     def make(loaded=True):
         info = {"model_name": "m", "alias": "champion", "resolved_version": "2"}
         monkeypatch.setattr(
@@ -87,10 +85,10 @@ def test_root_redirects_to_docs(client):
     assert r.status_code == 307 and r.headers["location"] == "/docs"
 
 
-def test_startup_fails_without_token(client, monkeypatch):
+def test_refresh_disabled_without_token(client, monkeypatch):
     monkeypatch.setattr(config, "REFRESH_API_TOKEN", "")
-    with pytest.raises(RuntimeError, match="REFRESH_API_TOKEN"), client():
-        pass
+    with client() as c:
+        assert c.post("/refresh", headers={"X-Refresh-Token": ""}).status_code == 401
 
 
 def test_model_info_and_503(client):

@@ -17,8 +17,6 @@ holder = ChampionHolder()
 
 @asynccontextmanager
 async def lifespan(_):
-    if not config.REFRESH_API_TOKEN:  # else a failed startup load could never recover
-        raise RuntimeError("REFRESH_API_TOKEN must be set")
     try:
         holder.load()
     except Exception:  # start anyway; /health reports 503 until a refresh works
@@ -73,7 +71,8 @@ def predict(req: PredictRequest):
 
 @app.post("/refresh", response_model=RefreshResponse)
 def refresh(x_refresh_token: str = Header(default="")):
-    if not secrets.compare_digest(
+    # Empty configured token disables the endpoint.
+    if not config.REFRESH_API_TOKEN or not secrets.compare_digest(
         x_refresh_token.encode(), config.REFRESH_API_TOKEN.encode()
     ):
         raise HTTPException(401, "Invalid refresh token")
