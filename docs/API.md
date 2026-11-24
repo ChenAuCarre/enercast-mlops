@@ -52,7 +52,7 @@ Exposes full traceability of the currently loaded production model.
 
 ```json
 {
-  "model_name": "building-energy-forecaster",
+  "model_name": "wattwise-energy-forecaster",
   "alias": "champion",
   "resolved_version": "2",
   "mlflow_run_id": "a1b2c3d4e5f67890",
@@ -112,7 +112,7 @@ All fields are required. Requests violating physical sensor boundaries or format
 ```json
 {
   "predicted_appliances_wh": 114.62,
-  "model_name": "building-energy-forecaster",
+  "model_name": "wattwise-energy-forecaster",
   "model_alias": "champion",
   "model_version": "2"
 }
