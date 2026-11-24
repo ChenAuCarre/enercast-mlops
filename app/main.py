@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 import pandas as pd
 from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from app import config
 from app.model import ChampionHolder
@@ -25,6 +25,11 @@ async def lifespan(_):
 
 
 app = FastAPI(title="enercast-mlops", lifespan=lifespan)
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse("/docs")
 
 
 @app.get("/health")

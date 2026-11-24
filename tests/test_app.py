@@ -70,3 +70,9 @@ def test_refresh_failure_keeps_old_model(monkeypatch):
         r = c.post("/refresh", headers={"X-Refresh-Token": "s3cret"})
         assert r.status_code == 502
         assert c.post("/predict", json=PAYLOAD).status_code == 200
+
+
+def test_root_redirects_to_docs():
+    with client() as c:
+        r = c.get("/", follow_redirects=False)
+    assert r.status_code == 307 and r.headers["location"] == "/docs"
