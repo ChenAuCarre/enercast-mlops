@@ -65,7 +65,7 @@ def get_git_commit():
 
 
 def is_git_dirty():
-    """Indicate whether the working tree contains uncommitted changes."""
+    """Return 'true'/'false' for uncommitted changes, or 'unknown' if Git is unavailable."""
     try:
         status_output = subprocess.check_output(
             ["git", "status", "--porcelain"],
@@ -73,9 +73,9 @@ def is_git_dirty():
             stderr=subprocess.DEVNULL,
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return False
+        return "unknown"
 
-    return bool(status_output.strip())
+    return "true" if status_output.strip() else "false"
 
 
 def evaluate_model(model, X_eval, y_eval):
@@ -111,7 +111,7 @@ def run_experiment(run_name, config, data):
                 "dataset_version": dataset_version,
                 "train_dvc_hash": data["train_dvc_hash"],
                 "git_commit": git_commit,
-                "git_dirty": "true" if git_dirty else "false",
+                "git_dirty": git_dirty,
                 "model_type": config["model_type"],
                 "train_rows": len(data["X_train"]),
                 "validation_rows": len(data["X_validation"]),
@@ -127,7 +127,7 @@ def run_experiment(run_name, config, data):
         mlflow.set_tags(
             {
                 "git_commit": git_commit,
-                "git_dirty": "true" if git_dirty else "false",
+                "git_dirty": git_dirty,
                 "model_role": config["role"],
                 "selection_split": "validation",
                 "final_test_usage": "separate_final_evaluation",

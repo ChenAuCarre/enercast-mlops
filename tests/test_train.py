@@ -108,7 +108,7 @@ def test_run_experiment_instantiates_a_fresh_estimator_per_run(monkeypatch):
     fake_mlflow = FakeMlflow()
     monkeypatch.setattr("ml.train.mlflow", fake_mlflow)
     monkeypatch.setattr("ml.train.get_git_commit", lambda: "abc123")
-    monkeypatch.setattr("ml.train.is_git_dirty", lambda: True)
+    monkeypatch.setattr("ml.train.is_git_dirty", lambda: "true")
 
     built = []
 
@@ -151,7 +151,7 @@ def test_get_git_commit_falls_back_to_unknown(monkeypatch):
 def test_is_git_dirty_returns_false_when_clean(monkeypatch):
     monkeypatch.setattr("ml.train.subprocess.check_output", lambda cmd, **kwargs: "")
 
-    assert is_git_dirty() is False
+    assert is_git_dirty() == "false"
 
 
 def test_is_git_dirty_returns_true_when_dirty(monkeypatch):
@@ -160,4 +160,13 @@ def test_is_git_dirty_returns_true_when_dirty(monkeypatch):
         lambda cmd, **kwargs: " M ml/train.py\n",
     )
 
-    assert is_git_dirty() is True
+    assert is_git_dirty() == "true"
+
+
+def test_is_git_dirty_returns_unknown_without_git(monkeypatch):
+    def fake_check_output(cmd, **kwargs):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr("ml.train.subprocess.check_output", fake_check_output)
+
+    assert is_git_dirty() == "unknown"
