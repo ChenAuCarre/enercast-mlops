@@ -45,47 +45,47 @@ DATASET_METADATA = {
 
 
 def _period(frame):
-    """Retourne la période couverte par un jeu de données (début, fin)."""
+    """Return the period covered by a dataset (start, end)."""
     dates = pd.to_datetime(frame["date"])
     return str(dates.min()), str(dates.max())
 
 
 def verify_dvc_hash(path, expected_hash):
-    """Vérifie le checksum DVC (MD5) d'un fichier versionné avant toute utilisation.
+    """Verify the DVC (MD5) checksum of a versioned file before any use.
 
-    Les fichiers versionnés par DVC sont consommés par le pipeline : avant de
-    les lire pour entraîner ou évaluer, on reconstruit le checksum attendu et
-    on refuse toute exécution en cas de divergence.
+    DVC-versioned files are consumed by the pipeline: before reading them
+    to train or evaluate, the expected checksum is rebuilt and
+    any run is refused if it differs.
     """
     file_path = Path(path)
 
     if not file_path.exists():
-        raise FileNotFoundError(f"Fichier versionné introuvable : {path}")
+        raise FileNotFoundError(f"Versioned file not found: {path}")
 
     actual_hash = file_md5(str(file_path))
 
     if actual_hash != expected_hash:
         raise ValueError(
             f"Hash DVC mismatch for {path}: expected {expected_hash}, got {actual_hash}. "
-            "Le fichier a changé depuis le versionnement DVC ; aucune exécution n'est "
-            "permise tant que le checksum ne correspond pas."
+            "The file has changed since DVC versioning; no run is "
+            "allowed until the checksum matches."
         )
 
     return actual_hash
 
 
 def read_dvc_metadata(metadata_path, expected_path):
-    """Lit le checksum MD5 et le chemin de sortie depuis les métadonnées DVC.
+    """Read the MD5 checksum and output path from the DVC metadata.
 
-    Le fichier de métadonnées (format YAML produit par DVC) contient une clé
-    ``outs`` listant les sorties. On attend exactement une sortie, avec un
-    checksum ``md5`` : les valeurs y sont la source de vérité du versionnement.
-    Le chemin déclaré doit correspondre au fichier attendu.
+    The metadata file (YAML produced by DVC) contains an ``outs`` key
+    listing the outputs. Exactly one output is expected, with an
+    ``md5`` checksum: the values there are the source of truth for versioning.
+    The declared path must match the expected file.
     """
     metadata_file = Path(metadata_path)
 
     if not metadata_file.exists():
-        raise FileNotFoundError(f"Métadonnées DVC introuvables : {metadata_path}")
+        raise FileNotFoundError(f"DVC metadata not found: {metadata_path}")
 
     with metadata_file.open(encoding="utf-8") as stream:
         metadata = yaml.safe_load(stream) or {}
@@ -94,8 +94,8 @@ def read_dvc_metadata(metadata_path, expected_path):
 
     if len(outs) != 1:
         raise ValueError(
-            f"Métadonnées DVC invalides pour {metadata_path} : "
-            f"attendu un seul 'outs', trouvé {len(outs)}."
+            f"Invalid DVC metadata for {metadata_path}: "
+            f"expected a single 'outs', found {len(outs)}."
         )
 
     out = outs[0]
@@ -104,15 +104,15 @@ def read_dvc_metadata(metadata_path, expected_path):
 
     if algorithm != "md5" or not checksum:
         raise ValueError(
-            f"Métadonnées DVC invalides pour {metadata_path} : "
-            f"checksum MD5 attendu, obtenu hash={algorithm!r} md5={checksum!r}."
+            f"Invalid DVC metadata for {metadata_path}: "
+            f"expected MD5 checksum, got hash={algorithm!r} md5={checksum!r}."
         )
 
     declared_path = out.get("path")
 
     if not declared_path:
         raise ValueError(
-            f"Métadonnées DVC invalides pour {metadata_path} : chemin de sortie absent."
+            f"Invalid DVC metadata for {metadata_path}: output path missing."
         )
 
     declared_file = (
@@ -123,19 +123,19 @@ def read_dvc_metadata(metadata_path, expected_path):
 
     if declared_file != Path(expected_path):
         raise ValueError(
-            f"Chemin de sortie incohérent dans les métadonnées de {metadata_path} : "
-            f"attendu {expected_path}, déclaré {declared_file}."
+            f"Inconsistent output path in the metadata of {metadata_path}: "
+            f"expected {expected_path}, declared {declared_file}."
         )
 
     return str(declared_file), checksum
 
 
 def load_data(dataset_version):
-    """Charge entraînement et validation pour un cycle d'entraînement.
+    """Load training and validation for a training cycle.
 
-    Le test final n'est volontairement pas lu ici. Ce chemin sert à
-    l'entraînement, à la comparaison champion/candidat et à la promotion :
-    il ne doit jamais consulter ``final_test``. L'évaluation finale passe
+    The final test is deliberately not read here. This path is used for
+    training, champion/candidate comparison and promotion:
+    it must never access ``final_test``. The final evaluation goes through
     exclusivement par :func:`run_final_evaluation`.
     """
     dataset_metadata = DATASET_METADATA[dataset_version]
@@ -155,10 +155,7 @@ def load_data(dataset_version):
     feature_columns = list(X_train.columns)
 
     if list(X_validation.columns) != feature_columns:
-        raise ValueError(
-            "Les colonnes de validation ne correspondent pas "
-            "aux colonnes d'entraînement."
-        )
+        raise ValueError("Validation columns do not match training columns.")
 
     return {
         "dataset_version": dataset_version,
@@ -174,11 +171,11 @@ def load_data(dataset_version):
 
 
 def load_final_test_data():
-    """Charge le jeu de test final.
+    """Load the final test set.
 
-    Cette fonction est réservée à l'évaluation finale indépendante, exécutée
-    après la sélection du modèle. Elle n'est appelée par aucun chemin de
-    promotion ni de Continuous Training.
+    This function is reserved for the independent final evaluation, run
+    after model selection. It is called by no promotion or
+    Continuous Training path.
     """
     final_test_path, final_test_hash = read_dvc_metadata(
         FINAL_TEST_METADATA_PATH,
@@ -191,21 +188,19 @@ def load_final_test_data():
     X_test, y_test = prepare_training_data(test_df)
 
     if list(X_test.columns) != FEATURE_COLUMNS:
-        raise ValueError(
-            "Les colonnes du test final ne correspondent pas au schéma attendu."
-        )
+        raise ValueError("Final test columns do not match the expected schema.")
 
     return X_test, y_test, _period(test_df), final_test_hash
 
 
 def run_v1(force=False):
-    """Entraînement initial (v1), puis promotion du modèle de référence.
+    """Initial training (v1), then promotion of the reference model.
 
-    Par défaut, refuse de s'exécuter si un champion existe déjà : relancer
-    v1 déplacerait l'alias ``champion`` vers le baseline v1 et écraserait un
-    champion plus récent (typiquement le candidat v2). Le drapeau
+    By default, refuses to run if a champion already exists: rerunning
+    v1 would move the ``champion`` alias to the v1 baseline and overwrite a
+    more recent champion (typically the v2 candidate). The flag
     ``force=True`` (CLI : ``--force-initial-training``) autorise
-    explicitement cet écrasement.
+    explicitly allows this overwrite.
     """
     print("\n=== INITIAL TRAINING: VERSION 1 ===")
 
@@ -353,11 +348,11 @@ def run_v2():
 
 
 def run_final_evaluation(dataset_version="v2"):
-    """Évalue le champion courant sur le test final.
+    """Evaluate the current champion on the final test.
 
-    Ce chemin est strictement séparé de l'entraînement et de la promotion :
-    il ne modifie ni le champion, ni le registre. Il est à exécuter
-    manuellement après la sélection du modèle, pour produire le score de
+    This path is strictly separate from training and promotion:
+    it modifies neither the champion nor the registry. It is meant to be run
+    manually after model selection, to produce the
     rapport.
     """
     print("\n=== FINAL EVALUATION (REPORTING ONLY) ===")
@@ -440,36 +435,36 @@ def run_final_evaluation(dataset_version="v2"):
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Entraînement/promotion (validation) ou évaluation finale "
-            "indépendante (test final)."
+            "Training/promotion (validation) or independent final "
+            "evaluation (final test)."
         )
     )
 
     parser.add_argument(
         "--dataset-version",
         choices=["v1", "v2"],
-        help="Version du pool d'entraînement (chemin entraînement/promotion).",
+        help="Training pool version (training/promotion path).",
     )
     parser.add_argument(
         "--final-evaluation",
         action="store_true",
         help=(
-            "Évalue le champion sur le test final, sans promotion. "
-            "À exécuter après la sélection du modèle."
+            "Evaluate the champion on the final test, without promotion. "
+            "Run after model selection."
         ),
     )
     parser.add_argument(
         "--eval-dataset-version",
         choices=["v1", "v2"],
         default="v2",
-        help="Version de référence journalisée lors de l'évaluation finale.",
+        help="Reference version logged during the final evaluation.",
     )
     parser.add_argument(
         "--force-initial-training",
         action="store_true",
         help=(
-            "Autorise run_v1 à remplacer un champion existant. "
-            "À n'utiliser qu'après une réinitialisation volontaire."
+            "Allow run_v1 to replace an existing champion. "
+            "Use only after a deliberate reset."
         ),
     )
 
@@ -487,7 +482,7 @@ def main():
         run_v2()
         return
 
-    parser.error("Indiquez --dataset-version {v1,v2} ou --final-evaluation.")
+    parser.error("Specify --dataset-version {v1,v2} or --final-evaluation.")
 
 
 if __name__ == "__main__":

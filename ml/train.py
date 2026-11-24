@@ -12,7 +12,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 EXPERIMENT_NAME = "WattWise-energy-forecasting-final"
 
-# Version utilisée par l'entrée de secours `python -m ml.train`.
+# Version used by the fallback entry point `python -m ml.train`.
 DATASET_VERSION = "v1"
 
 MODELS = {
@@ -38,11 +38,11 @@ MODELS = {
 
 
 def build_estimator(model_type: str, params: dict | None = None):
-    """Instancie un estimateur frais à chaque appel.
+    """Instantiate a fresh estimator on each call.
 
-    Les estimateurs sklearn sont mutables : un même objet réutilisé entre deux
-    runs serait réutilisé après ``fit`` (état conservé), faussant les scores.
-    Chaque expérience doit donc disposer de son instance dédiée.
+    sklearn estimators are mutable: the same object reused across two
+    runs would be reused after ``fit`` (state kept), skewing scores.
+    Each experiment must therefore have its own instance.
     """
     if model_type == "LinearRegression":
         return LinearRegression()
@@ -50,11 +50,11 @@ def build_estimator(model_type: str, params: dict | None = None):
     if model_type == "HistGradientBoostingRegressor":
         return HistGradientBoostingRegressor(**(params or {}))
 
-    raise ValueError(f"Type d'estimateur inconnu : {model_type}")
+    raise ValueError(f"Unknown estimator type: {model_type}")
 
 
 def get_git_commit():
-    """Retourne le hash du commit Git courant, ou 'unknown' si Git est indisponible."""
+    """Return the current Git commit hash, or 'unknown' if Git is unavailable."""
     try:
         return subprocess.check_output(
             ["git", "rev-parse", "HEAD"],
@@ -65,7 +65,7 @@ def get_git_commit():
 
 
 def is_git_dirty():
-    """Indique si le working tree contient des modifications non commitées."""
+    """Indicate whether the working tree contains uncommitted changes."""
     try:
         status_output = subprocess.check_output(
             ["git", "status", "--porcelain"],
@@ -79,7 +79,7 @@ def is_git_dirty():
 
 
 def evaluate_model(model, X_eval, y_eval):
-    """Calcule les prédictions et les métriques sur un jeu d'évaluation."""
+    """Compute predictions and metrics on an evaluation set."""
     predictions = model.predict(X_eval)
 
     metrics = {
@@ -92,11 +92,11 @@ def evaluate_model(model, X_eval, y_eval):
 
 
 def run_experiment(run_name, config, data):
-    """Entraîne un modèle et journalise l'expérience dans MLflow.
+    """Train a model and log the experiment in MLflow.
 
-    Seuls l'entraînement et la validation sont utilisés ici. Le jeu de test
-    final n'est ni lu, ni évalué : il reste réservé à l'évaluation finale
-    indépendante (`python -m ml.pipeline --final-evaluation`).
+    Only training and validation are used here. The final test set
+    is neither read nor evaluated: it remains reserved for the independent final
+    evaluation (`python -m ml.pipeline --final-evaluation`).
     """
     model = build_estimator(config["model_type"], config.get("params"))
     dataset_version = data["dataset_version"]
@@ -206,7 +206,7 @@ def run_experiment(run_name, config, data):
 
 
 def main():
-    # Import local pour éviter un cycle d'imports entre ml.pipeline et ml.train.
+    # Local import to avoid an import cycle between ml.pipeline and ml.train.
     from ml.pipeline import load_data
 
     data = load_data(DATASET_VERSION)

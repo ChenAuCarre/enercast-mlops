@@ -1,14 +1,14 @@
-"""Séparation chronologique des données d'entraînement et de validation.
+"""Chronological split of training and validation data.
 
-Le jeu de test final n'est jamais utilisé pour choisir un modèle : il est
-réservé à l'évaluation finale indépendante. La validation, elle, sert à
-comparer le champion et le candidat lors d'un cycle de Continuous Training.
+The final test set is never used to choose a model: it is
+reserved for the independent final evaluation. Validation is used to
+compare champion and candidate during a Continuous Training cycle.
 """
 
 import pandas as pd
 
-# Fraction du pool d'entraînement réservée à la validation.
-# La validation correspond toujours aux dernières observations du pool.
+# Fraction of the training pool reserved for validation.
+# Validation is always the last observations of the pool.
 VALIDATION_FRACTION = 0.15
 
 
@@ -17,36 +17,34 @@ def split_train_validation(
     validation_fraction: float = VALIDATION_FRACTION,
     date_column: str = "date",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Sépare un pool chronologique en entraînement puis validation.
+    """Split a chronological pool into training then validation.
 
-    La validation est la fin de la période : elle est postérieure à toutes
-    les observations d'entraînement, ce qui évite toute fuite du futur vers
-    le passé. Le jeu de test final n'est pas concerné par cette fonction.
+    Validation is the end of the period: it is later than all
+    training observations, which prevents any leakage from the future into
+    the past. The final test set is not concerned by this function.
     """
     if not 0 < validation_fraction < 1:
-        raise ValueError(
-            "validation_fraction doit être strictement comprise entre 0 et 1."
-        )
+        raise ValueError("validation_fraction must be strictly between 0 and 1.")
 
     if date_column not in dataset.columns:
-        raise ValueError(f"Colonne de date absente : {date_column}")
+        raise ValueError(f"Date column missing: {date_column}")
 
     if len(dataset) < 2:
-        raise ValueError("Le jeu de données doit contenir au moins deux lignes.")
+        raise ValueError("The dataset must contain at least two rows.")
 
     dates = pd.to_datetime(dataset[date_column], errors="raise")
 
     if dates.isna().any():
-        raise ValueError("Le jeu de données contient des dates manquantes.")
+        raise ValueError("The dataset contains missing dates.")
 
     if not dates.is_monotonic_increasing:
-        raise ValueError("Le jeu de données doit être trié par date croissante.")
+        raise ValueError("The dataset must be sorted by ascending date.")
 
     if dates.duplicated().any():
-        raise ValueError("Le jeu de données contient des dates dupliquées.")
+        raise ValueError("The dataset contains duplicated dates.")
 
-    # Arrondi vers le bas, avec au moins une ligne de validation et une
-    # ligne d'entraînement pour que les deux jeux restent exploitables.
+    # Round down, with at least one validation row and one
+    # training row so that both sets remain usable.
     validation_rows = int(len(dataset) * validation_fraction)
     validation_rows = max(1, min(validation_rows, len(dataset) - 1))
 
@@ -57,9 +55,7 @@ def split_train_validation(
         pd.to_datetime(train[date_column]).max()
         >= pd.to_datetime(validation[date_column]).min()
     ):
-        raise ValueError(
-            "La séparation entraînement/validation n'est pas chronologique."
-        )
+        raise ValueError("The training/validation split is not chronological.")
 
     return train, validation
 
@@ -68,10 +64,10 @@ def load_train_validation(
     train_path,
     validation_fraction: float = VALIDATION_FRACTION,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Lit le pool d'entraînement et sépare entraînement / validation.
+    """Read the training pool and split into training / validation.
 
-    Le jeu de test final n'est volontairement pas lu ici : il ne doit jamais
-    être consulté pendant l'entraînement ni pendant un cycle de CT.
+    The final test set is deliberately not read here: it must never
+    be consulted during training or during a CT cycle.
     """
     train_pool = pd.read_csv(train_path)
 
@@ -82,10 +78,10 @@ def load_train_validation(
 
 
 def load_final_test(test_path) -> pd.DataFrame:
-    """Lit le jeu de test final.
+    """Read the final test set.
 
-    Cette fonction est réservée à l'évaluation finale indépendante, exécutée
-    après la sélection du modèle. Elle ne doit pas être appelée par le chemin
-    d'entraînement, de comparaison ou de promotion.
+    This function is reserved for the independent final evaluation, run
+    after model selection. It must not be called by the
+    training, comparison or promotion path.
     """
     return pd.read_csv(test_path)

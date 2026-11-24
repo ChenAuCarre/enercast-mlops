@@ -1,7 +1,7 @@
-"""Tests de l'instanciation des estimateurs dans ``ml.train``.
+"""Tests of estimator instantiation in ``ml.train``.
 
-Les estimateurs sklearn sont mutables : chaque run doit disposer d'une
-instance dédiée, fournie par :func:`build_estimator`.
+sklearn estimators are mutable: each run must have its own
+instance, provided by :func:`build_estimator`.
 """
 
 import subprocess
@@ -100,7 +100,7 @@ def test_build_estimator_returns_a_fresh_hist_gradient_boosting_instance():
 
 
 def test_build_estimator_rejects_unknown_type():
-    with pytest.raises(ValueError, match="Type d'estimateur inconnu"):
+    with pytest.raises(ValueError, match="Unknown estimator type"):
         build_estimator("RandomForestRegressor")
 
 

@@ -1,8 +1,8 @@
-"""Tests du chemin de promotion.
+"""Tests of the promotion path.
 
-Deux garanties sont vérifiées : le test final n'est jamais lu pendant
-l'entraînement/la promotion, et ``run_v1`` ne peut pas écraser un champion
-existant sans autorisation explicite.
+Two guarantees are checked: the final test is never read during
+training/promotion, and ``run_v1`` cannot overwrite a champion
+without explicit authorization.
 """
 
 import hashlib
@@ -41,7 +41,7 @@ class FakeRun:
 
 
 class FakeMlflow:
-    """Client MLflow minimal : aucun appel réseau, aucun fichier mlruns."""
+    """Minimal MLflow client: no network call, no mlruns file."""
 
     def __init__(self):
         self.params = {}
@@ -74,7 +74,7 @@ class FakeMlflow:
 
 
 def synthetic_pool(rows=40):
-    """Petit jeu brut contenant toutes les colonnes attendues par le modèle."""
+    """Small raw dataset containing all the columns expected by the model."""
     dates = pd.date_range("2016-01-01", periods=rows, freq="10min")
     data = {
         "date": dates.astype(str),
@@ -86,7 +86,7 @@ def synthetic_pool(rows=40):
 
 
 def promotion_data():
-    """Données d'entraînement/validation uniquement, sans test final."""
+    """Training/validation data only, without final test."""
     pool = synthetic_pool()
     train_df, validation_df = split_train_validation(
         pool,
@@ -116,17 +116,15 @@ def promotion_data():
 
 
 def forbid_final_test_read(*args, **kwargs):
-    raise AssertionError(
-        "Le test final ne doit pas être lu par le chemin de promotion."
-    )
+    raise AssertionError("The final test must not be read by the promotion path.")
 
 
 def forbid_promotion(*args, **kwargs):
-    raise AssertionError("L'évaluation finale ne doit jamais promouvoir de modèle.")
+    raise AssertionError("The final evaluation must never promote a model.")
 
 
 def forbid_training(*args, **kwargs):
-    raise AssertionError("run_v1 doit s'arrêter avant tout chargement ou entraînement.")
+    raise AssertionError("run_v1 must stop before any loading or training.")
 
 
 def no_champion():
@@ -192,7 +190,7 @@ def test_read_dvc_metadata_rejects_missing_outs(tmp_path):
     metadata_path = tmp_path / "train.csv.dvc"
     metadata_path.write_text("foo: bar\n", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="un seul 'outs'"):
+    with pytest.raises(ValueError, match="a single 'outs'"):
         read_dvc_metadata(
             str(metadata_path),
             str(tmp_path / "train.csv"),
@@ -203,7 +201,7 @@ def test_read_dvc_metadata_rejects_missing_md5(tmp_path):
     metadata_path = tmp_path / "train.csv.dvc"
     metadata_path.write_text("outs:\n- path: train.csv\n", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="checksum MD5 attendu"):
+    with pytest.raises(ValueError, match="expected MD5 checksum"):
         read_dvc_metadata(
             str(metadata_path),
             str(tmp_path / "train.csv"),
@@ -217,7 +215,7 @@ def test_read_dvc_metadata_rejects_path_mismatch(tmp_path):
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="incohérent"):
+    with pytest.raises(ValueError, match="Inconsistent"):
         read_dvc_metadata(
             str(metadata_path),
             str(tmp_path / "train.csv"),
@@ -452,7 +450,7 @@ def test_run_final_evaluation_never_promotes(monkeypatch):
 
 
 def test_final_test_loader_is_not_imported_by_promotion_helpers():
-    """Garde-fou statique : load_data/run_v1/run_v2 n'appellent pas le chargeur."""
+    """Static guard: load_data/run_v1/run_v2 do not call the loader."""
     import inspect
 
     from ml import pipeline

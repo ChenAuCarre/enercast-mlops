@@ -1,4 +1,4 @@
-"""Tests du découpage chronologique entraînement / validation / test final."""
+"""Tests of the chronological training / validation / final test split."""
 
 import pandas as pd
 import pytest
@@ -86,7 +86,7 @@ def test_missing_date_column_is_rejected(chronological_data):
 def test_too_few_rows_is_rejected():
     single_row = pd.DataFrame({"date": ["2016-01-01 00:00:00"]})
 
-    with pytest.raises(ValueError, match="deux lignes"):
+    with pytest.raises(ValueError, match="two rows"):
         split_train_validation(single_row)
 
 
@@ -94,7 +94,7 @@ def test_unsorted_dates_are_rejected(chronological_data):
     unsorted_data = chronological_data.copy()
     unsorted_data.loc[[0, 5], "date"] = unsorted_data.loc[[5, 0], "date"].to_numpy()
 
-    with pytest.raises(ValueError, match="trié"):
+    with pytest.raises(ValueError, match="sorted"):
         split_train_validation(unsorted_data)
 
 
@@ -102,7 +102,7 @@ def test_duplicate_dates_are_rejected(chronological_data):
     duplicated_data = chronological_data.copy()
     duplicated_data.loc[10, "date"] = duplicated_data.loc[11, "date"]
 
-    with pytest.raises(ValueError, match="dupliquées"):
+    with pytest.raises(ValueError, match="duplicated"):
         split_train_validation(duplicated_data)
 
 
@@ -110,7 +110,7 @@ def test_missing_dates_are_rejected(chronological_data):
     missing_data = chronological_data.copy()
     missing_data.loc[3, "date"] = None
 
-    with pytest.raises(ValueError, match="manquantes"):
+    with pytest.raises(ValueError, match="missing dates"):
         split_train_validation(missing_data)
 
 

@@ -1,7 +1,7 @@
-"""Tests de la lecture du champion dans le registre MLflow.
+"""Tests of champion reading from the MLflow registry.
 
-Le client MLflow est entièrement simulé : aucun appel réseau, aucune base
-de données, aucun fichier ``mlruns`` n'est nécessaire.
+The MLflow client is fully mocked: no network call, no database,
+no ``mlruns`` file is needed.
 """
 
 from types import SimpleNamespace
@@ -27,7 +27,7 @@ from ml.registry import (
 
 
 class FakeClient:
-    """Client MLflow minimal qui renvoie un résultat ou lève une erreur."""
+    """Minimal MLflow client that returns a result or raises an error."""
 
     def __init__(self, result=None, error=None, version=None):
         self.result = result
@@ -96,7 +96,7 @@ def test_missing_alias_means_no_champion(monkeypatch):
 
 
 def test_no_champion_error_stays_a_runtime_error():
-    """Compatibilité : les appelants existants attrapent RuntimeError."""
+    """Compatibility: existing callers catch RuntimeError."""
     assert issubclass(NoChampionRegistered, RuntimeError)
 
 
