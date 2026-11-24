@@ -19,21 +19,11 @@ MODELS = {
     "baseline-linear-regression-v1": {
         "role": "baseline",
         "model_type": "LinearRegression",
-        "estimator": LinearRegression(),
         "params": {},
     },
     "candidate-hist-gradient-boosting-v2": {
         "role": "candidate",
         "model_type": "HistGradientBoostingRegressor",
-        "estimator": HistGradientBoostingRegressor(
-            loss="absolute_error",
-            max_iter=300,
-            max_leaf_nodes=7,
-            learning_rate=0.05,
-            min_samples_leaf=30,
-            l2_regularization=1.0,
-            random_state=42,
-        ),
         "params": {
             "loss": "absolute_error",
             "max_iter": 300,
@@ -45,6 +35,22 @@ MODELS = {
         },
     },
 }
+
+
+def build_estimator(model_type: str, params: dict | None = None):
+    """Instancie un estimateur frais à chaque appel.
+
+    Les estimateurs sklearn sont mutables : un même objet réutilisé entre deux
+    runs serait réutilisé après ``fit`` (état conservé), faussant les scores.
+    Chaque expérience doit donc disposer de son instance dédiée.
+    """
+    if model_type == "LinearRegression":
+        return LinearRegression()
+
+    if model_type == "HistGradientBoostingRegressor":
+        return HistGradientBoostingRegressor(**(params or {}))
+
+    raise ValueError(f"Type d'estimateur inconnu : {model_type}")
 
 
 def get_git_commit():
@@ -74,7 +80,7 @@ def run_experiment(run_name, config, data):
     final n'est ni lu, ni évalué : il reste réservé à l'évaluation finale
     indépendante (`python -m ml.pipeline --final-evaluation`).
     """
-    model = config["estimator"]
+    model = build_estimator(config["model_type"], config.get("params"))
     dataset_version = data["dataset_version"]
 
     with mlflow.start_run(run_name=run_name) as run:
