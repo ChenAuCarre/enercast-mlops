@@ -30,13 +30,9 @@ def client(monkeypatch):
     """Factory: client(loaded=True) -> TestClient; all patches undone per test."""
 
     def make(loaded=True):
-        monkeypatch.setattr(main.holder, "model", FakeModel() if loaded else None)
+        info = {"model_name": "m", "alias": "champion", "resolved_version": "2"}
         monkeypatch.setattr(
-            main.holder,
-            "info",
-            {"model_name": "m", "alias": "champion", "resolved_version": "2"}
-            if loaded
-            else None,
+            main.holder, "state", (FakeModel(), info) if loaded else None
         )
         monkeypatch.setattr(main.holder, "load", lambda: None)  # skip MLflow
         return TestClient(main.app)
@@ -105,7 +101,7 @@ def test_model_info_and_503(client):
 
 def test_holder_load_keeps_old_model_on_failure(monkeypatch):
     h = model.ChampionHolder()
-    h.model, h.info = "old", {"resolved_version": "1"}
+    h.state = ("old", {"resolved_version": "1"})
 
     def boom():
         raise RuntimeError("no champion")

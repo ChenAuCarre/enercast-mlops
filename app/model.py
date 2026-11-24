@@ -1,4 +1,3 @@
-import threading
 from datetime import UTC, datetime
 
 import mlflow
@@ -10,13 +9,20 @@ class ChampionHolder:
     """Holds the loaded @champion model; a failed reload keeps the old one."""
 
     def __init__(self):
-        self._lock = threading.Lock()
-        self.model = None
-        self.info = None
+        # (model, info) swapped as one tuple so readers never see a mismatched pair.
+        self.state = None
+
+    @property
+    def model(self):
+        return self.state[0] if self.state else None
+
+    @property
+    def info(self):
+        return self.state[1] if self.state else None
 
     @property
     def version(self):
-        return self.info["resolved_version"] if self.info else None
+        return self.state[1]["resolved_version"] if self.state else None
 
     def load(self):
         mv = registry.get_champion()  # raises NoChampionRegistered
@@ -30,5 +36,4 @@ class ChampionHolder:
             "dataset_version": params.get("dataset_version"),
             "loaded_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         }
-        with self._lock:
-            self.model, self.info = model, info
+        self.state = (model, info)

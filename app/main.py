@@ -55,15 +55,17 @@ def model_info():
 
 @app.post("/predict", response_model=PredictResponse)
 def predict(req: PredictRequest):
-    if holder.model is None:
+    state = holder.state  # one read: model and info stay consistent across a refresh
+    if state is None:
         raise HTTPException(503, "Champion model not loaded")
+    model, info = state
     X = preprocess_features(pd.DataFrame([req.model_dump()]))
-    y = float(holder.model.predict(X)[0])
+    y = float(model.predict(X)[0])
     return PredictResponse(
         predicted_appliances_wh=round(y, 2),
-        model_name=holder.info["model_name"],
-        model_alias=holder.info["alias"],
-        model_version=holder.version,
+        model_name=info["model_name"],
+        model_alias=info["alias"],
+        model_version=info["resolved_version"],
     )
 
 
