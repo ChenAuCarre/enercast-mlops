@@ -47,9 +47,8 @@ same tree, so `cd-prod` can deploy exactly the bytes `cd-staging` tested.
 |---|---|---|
 | Variable | `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME` | all |
 | Variable | `API_BASE_URL` (live service URL) | `cd-prod`, `ct-retrain`, `rollback` |
-| Secret | `MLFLOW_TRACKING_PASSWORD`, `REFRESH_API_TOKEN` | all |
+| Secret | `MLFLOW_TRACKING_PASSWORD`, `REFRESH_API_TOKEN` | all (`MLFLOW_TRACKING_PASSWORD` also authenticates the DVC remote in `ct-retrain`) |
 | Secret | `RENDER_DEPLOY_HOOK_URL`, `RENDER_API_KEY` | `cd-prod` |
-| Secret | `DAGSHUB_USERNAME`, `DAGSHUB_TOKEN` | `ct-retrain` (DVC remote) |
 
 The Render service itself holds `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME`,
 `MLFLOW_TRACKING_PASSWORD` and `REFRESH_API_TOKEN` as environment variables; Render injects `PORT`.
