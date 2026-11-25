@@ -46,7 +46,9 @@ def main() -> None:
         "--limit", type=int, default=1000, help="number of rows to send"
     )
     parser.add_argument(
-        "--shuffle", action="store_true", help="send rows in random order"
+        "--ordered",
+        action="store_true",
+        help="send rows in file order (time-ordered traffic reads as drift)",
     )
     parser.add_argument(
         "--broken", action="store_true", help="send rows with a missing column"
@@ -71,7 +73,7 @@ def main() -> None:
     with open(args.file, newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
 
-    if args.shuffle:
+    if not args.ordered:  # a few days of ordered rows differ from the training months
         random.shuffle(rows)
 
     fields = ["date", *FEATURE_COLUMNS]

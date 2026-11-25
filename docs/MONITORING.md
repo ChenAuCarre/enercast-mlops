@@ -52,13 +52,13 @@ The API serves its metrics at `GET /metrics` through `prometheus_client`.
 | `http_request_duration_seconds` | Histogram | `path` |
 | `predictions_total` | Counter | `model_version` |
 | `prediction_value_wh` | Histogram | `model_version` (predicted appliance energy in Wh) |
-| `model_info` | Gauge | `model_version`, value 1 when loaded, 0 when not loaded |
+| `model_info` | Gauge | `model_version` of the loaded champion, value 1; no series until a model loads |
 | `feature_drift` | Gauge | `feature` (PSI against the champion training profile) |
 
 ## Data drift
 
 - Reference: `training-profile.json` artifact of the champion version
-  (deciles per feature).
+  (per feature: bin edges and the real training share of each bin).
 - Live distribution: last 500 predictions per feature (`DRIFT_WINDOW_SIZE`).
 - Recomputed every 100 predictions (`DRIFT_WINDOW_RESET_EVERY`).
 - Threshold: `DRIFT_THRESHOLD = 0.20` (PSI).
@@ -86,9 +86,12 @@ for alert emails (see `.env.example`).
 ```bash
 python scripts/replay.py --file data/versions/v2/train.csv --url http://localhost:8000/predict --limit 20
 python scripts/replay.py --file data/versions/v2/train.csv --rate 5 --limit 1200 --broken
-python scripts/replay.py --file data/versions/v2/train.csv --shuffle --limit 20
+python scripts/replay.py --file data/versions/v2/train.csv --ordered --limit 20
 python scripts/replay.py --file data/versions/v2/train.csv --shift To=10 --limit 600
 ```
+
+Rows are shuffled by default: about 3.5 days of time-ordered rows look different from
+months of training data and trip the drift alert. `--ordered` keeps file order.
 
 `--broken` sends rows with a missing feature column (expected `422` responses).
 It exercises the 4xx logs and metrics; it does **not** trigger the 5xx error-rate
@@ -103,9 +106,10 @@ trigger the drift alert after 100+ predictions (repeat the flag for several feat
 The Grafana alerting rules provisioned in `monitoring/grafana-alerting.yml`:
 
 1. API down: the Prometheus scrape of the API (`up{job="api"}`) has failed for 1 minute (no data counts as down).
-2. High error rate: more than 5% of `/predict` requests failed with a 5xx status
+2. High error rate: more than 5% of all API requests (including `/health` checks and
+   Prometheus scrapes) failed with a 5xx status
    over 2 minutes.
-3. Data drift: a feature drifted at or above 0.20 PSI for 2 minutes.
+3. Data drift: a feature drifted above 0.20 PSI for 2 minutes.
 
 The no-data state is set to `Normal` for the error-rate and drift rules so that
 restarts of the API do not fire false alerts.
