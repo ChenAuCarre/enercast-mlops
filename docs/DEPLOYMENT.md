@@ -16,7 +16,7 @@ scripts/smoke_test.sh http://localhost:8000  # readiness + /model-info + real pr
 ```
 
 Web UI: <http://localhost:8000/>. Swagger UI: <http://localhost:8000/docs>. A sample `/predict`
-request is in the [README](../README.md).
+request is in [API.md](API.md#example-request).
 
 Configuration is read from environment variables at start-up (`.env` is passed with `--env-file`); nothing is baked into the image:
 

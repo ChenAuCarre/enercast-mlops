@@ -140,20 +140,14 @@ aborts the run.
 
 ```bash
 uv sync --frozen --group experiment
-
-uv run dvc remote modify origin --local auth basic
-uv run dvc remote modify origin --local user "$DAGSHUB_USERNAME"
-uv run dvc remote modify origin --local password "$DAGSHUB_TOKEN"
-
+# DVC remote credentials: see CONTRIBUTING.md, "DVC Remote"
 uv run dvc pull data/versions/v1/train.csv.dvc
 uv run dvc pull data/versions/v2/train.csv.dvc
 uv run dvc pull data/versions/test/final_test.csv.dvc
 ```
 
-`DAGSHUB_USERNAME` and `DAGSHUB_TOKEN` are read from the environment. Never
-commit `.dvc/config.local` or any credential file. The `ct-retrain.yml` workflow
-performs the same configuration from the `DAGSHUB_USERNAME` and `DAGSHUB_TOKEN`
-GitHub secrets, then pulls only the pointer selected by the workflow input.
+The `ct-retrain.yml` workflow configures the same credentials from GitHub
+secrets, then pulls only the pointer selected by the workflow input.
 
 ## 7. Data contract
 

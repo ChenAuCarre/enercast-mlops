@@ -33,11 +33,7 @@ Add dependencies to the right group and commit the updated `pyproject.toml` and 
 
 ### Environment Variables & Secrets
 
-Required variables:
-* `MLFLOW_TRACKING_URI`
-* `MLFLOW_TRACKING_USERNAME`
-* `MLFLOW_TRACKING_PASSWORD` (the DagsHub token, also used as the DVC remote password)
-* `REFRESH_API_TOKEN`
+Put the variables listed in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#run-locally-with-docker) in a git-ignored `.env`. `MLFLOW_TRACKING_PASSWORD` is your DagsHub token, also used as the DVC remote password.
 
 **Never expose secrets** in commits, logs, notebook outputs, screenshots, issues, or PR descriptions. If a secret leaks, rotate it immediately.
 
@@ -59,13 +55,15 @@ uv run dvc pull  # fetches the tracked datasets
 Three long-lived branches, promoted in order:
 
 ```text
-<type>/<topic> ──► dev ──► staging ──► main
+<type>/<topic> ──PR──► dev ──PR──► staging ──PR──► main
 ```
 
-1. **Branch off `dev`** and name branches per [Conventional Branch](https://conventional-branch.github.io/).
-2. **Write commits** per [Conventional Commits](https://www.conventionalcommits.org/).
-3. **Open PRs against `dev`**. Keep them small and focused. Merging requires one teammate's approval and passing `ci-pr.yml` checks.
-4. **Promote releases**: `dev` → `staging` runs staging validation (`cd-staging.yml`); `staging` → `main` deploys to production (`cd-prod.yml`).
+1. **Branch off `dev`** with a short-lived branch named per [Conventional Branch](https://conventional-branch.github.io/) (`feature/*`, `feat/*`, `fix/*`, `docs/*`, `ci/*`, ...).
+2. **Write commits and PR titles** per [Conventional Commits](https://www.conventionalcommits.org/) (the PR title is checked in CI).
+3. **Open PRs against `dev`**. Keep them small and focused.
+4. **Promote releases** with a PR from `dev` to `staging`, then from `staging` to `main`. Any other source branch is rejected. Merging to `staging` validates the release candidate; merging to `main` deploys it (see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#workflows-and-the-branches-that-trigger-them)).
+
+Repository rulesets protect `dev`, `staging` and `main`: changes go through a pull request with one approval, force-push and deletion are blocked, and the `ci-pass` check must pass (plus `check-source` on `staging` and `main`).
 
 ---
 
@@ -74,21 +72,15 @@ Three long-lived branches, promoted in order:
 Before opening a PR, run the checks enforced by `.github/workflows/ci-pr.yml`:
 
 ```bash
-uv run ruff check app/ tests/
-uv run pytest -v
+uv lock --check
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest
 ```
 
-Tests use fixtures and an isolated mock MLflow registry, so they never touch production models. New features need tests covering:
-* Prediction schema and `@champion` version reporting (`tests/test_api_predictions.py`)
-* Malformed or out-of-range inputs (`tests/test_input_validation.py`)
-* Registry alias isolation and promotion gates (`tests/test_registry_and_gates.py`)
+Tests use fake models and a mocked MLflow registry, so they never touch production models. Add tests next to the code you change: `tests/test_app.py` for the API (predictions, invalid inputs, model loading and refresh), `tests/test_policy*.py` and `tests/test_registry.py` for promotion and rollback rules.
 
-Verify the slim image builds without datasets, credentials, or dev-only packages:
-
-```bash
-docker build -t enercast-api:local .
-docker run --rm -p 8000:8000 --env-file .env enercast-api:local
-```
+To check the image, build and smoke-test it locally as described in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#run-locally-with-docker).
 
 ---
 
