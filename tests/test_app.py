@@ -152,3 +152,13 @@ def test_json_log_line_carries_request_id():
     line = json.loads(logs.JsonFormatter().format(record))
     assert line["message"] == "hi x" and line["request_id"] == "r-1"
     assert line["level"] == "WARNING"
+
+
+def test_metrics_exposes_requests_and_predictions(client):
+    with client() as c:
+        c.post("/predict", json=PAYLOAD)
+        body = c.get("/metrics").text
+    assert 'http_requests_total{method="POST",path="/predict",status="200"}' in body
+    assert "http_request_duration_seconds_bucket" in body
+    assert 'predictions_total{model_version="2"}' in body
+    assert "model_served_version" in body

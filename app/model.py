@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 import mlflow
 
+from app import metrics
 from ml import registry
 
 
@@ -37,3 +38,4 @@ class ChampionHolder:
             "loaded_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         }
         self.state = (model, info)
+        metrics.SERVED_VERSION.set(int(mv.version))

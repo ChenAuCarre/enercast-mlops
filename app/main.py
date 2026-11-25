@@ -1,14 +1,16 @@
 import logging
 import secrets
+import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pandas as pd
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from app import config, logs
+from app import config, logs, metrics
 from app.model import ChampionHolder
 from app.schemas import PredictRequest, PredictResponse, RefreshResponse
 from ml.preprocess import preprocess_features
@@ -34,9 +36,24 @@ app = FastAPI(title="enercast-mlops", lifespan=lifespan)
 async def request_context(request: Request, call_next):
     rid = request.headers.get("X-Request-ID") or uuid.uuid4().hex
     logs.request_id.set(rid)
-    response = await call_next(request)
+    start, status = time.perf_counter(), 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+    finally:
+        route = request.scope.get("route")
+        path = route.path if route else "unmatched"  # bounded label cardinality
+        metrics.REQUESTS.labels(request.method, path, str(status)).inc()
+        metrics.LATENCY.labels(request.method, path).observe(
+            time.perf_counter() - start
+        )
     response.headers["X-Request-ID"] = rid
     return response
+
+
+@app.get("/metrics", include_in_schema=False)
+def prometheus_metrics():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -76,6 +93,7 @@ def predict(req: PredictRequest):
     model, info = state
     X = preprocess_features(pd.DataFrame([req.model_dump()]))
     y = float(model.predict(X)[0])
+    metrics.PREDICTIONS.labels(info["resolved_version"]).inc()
     return PredictResponse(
         predicted_appliances_wh=round(y, 2),
         model_name=info["model_name"],
