@@ -1,15 +1,4 @@
 apiVersion: 1
-contactPoints:
-  - orgId: 1
-    name: wattwise-email
-    receivers:
-      - uid: wattwise-email
-        type: email
-        settings:
-          addresses: ${ALERT_EMAIL_TO}
-policies:
-  - orgId: 1
-    receiver: wattwise-email
 groups:
   - orgId: 1
     name: wattwise-api

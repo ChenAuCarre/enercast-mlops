@@ -17,8 +17,8 @@ The deployed API exposes three monitoring concerns:
 
 The champion training profile (`training-profile.json`) is logged by the
 training run (`ml.train`) from the training features; the API downloads it from
-the MLflow run of the champion version on its first prediction (and again after
-a `/refresh`).
+the MLflow run of the champion version when it loads the champion (at startup
+and after a `/refresh`).
 
 ## Structured logs
 
@@ -35,7 +35,7 @@ a `/refresh`).
   `drift_profile_loaded`, `drift_profile_missing`, `model_refreshed`.
 - Drift event: `data_drift_detected` (warning, with the `features` above the threshold)
   at each recompute where a feature drifted.
-- 5xx responses are logged with level `error`, 4xx with `warning`.
+- 5xx responses are logged with level `error`.
 - The request id comes from the `X-Request-ID` header (generated when missing) and
   is echoed in the response and attached to every log line of the request.
 
@@ -83,28 +83,17 @@ docker compose logs api --no-log-prefix
 - Prometheus: http://localhost:9090/targets
 - Grafana: http://localhost:3000 (user `admin`, password `GRAFANA_ADMIN_PASSWORD`, required)
 
-All ports are bound to `127.0.0.1`. Set `SMTP_ENABLED=true`, `ALERT_EMAIL_TO` and the
-`SMTP_*` variables for alert emails (see `.env.example`).
+All ports are bound to `127.0.0.1`.
 
 ## Replay
 
 ```bash
 python scripts/replay.py --file data/versions/v2/train.csv --url http://localhost:8000/predict --limit 20
-python scripts/replay.py --file data/versions/v2/train.csv --rate 5 --limit 1200 --broken
-python scripts/replay.py --file data/versions/v2/train.csv --ordered --limit 20
-python scripts/replay.py --file data/versions/v2/train.csv --shift To=10 --limit 600
+python scripts/replay.py --file data/versions/v2/train.csv --rate 5 --limit 1200
 ```
 
-Rows are shuffled by default: about 3.5 days of time-ordered rows look different from
-months of training data and trip the drift alert. `--ordered` keeps file order.
-
-`--broken` sends rows with a missing feature column (expected `422` responses).
-It exercises the 4xx logs and metrics; it does **not** trigger the 5xx error-rate
-alert, which needs real server errors (for example a champion that is not loaded,
-answering `503`).
-
-`--shift To=10` adds a delta to a feature in every row, to simulate drift and
-trigger the drift alert after 500+ predictions (repeat the flag for several features).
+Rows are shuffled: about 3.5 days of time-ordered rows look different from
+months of training data and trip the drift alert.
 
 ## Alerts
 
@@ -130,15 +119,6 @@ The dashboard `WattWise API` (provisioned JSON) contains:
 4. Predictions per model version.
 5. Drift per feature, with a threshold line at 0.20.
 6. The model version currently served.
-
-## Rollback watch
-
-After a rollback (`rollback.yml`) and a `/refresh` or a service restart:
-
-1. Note the champion version before the rollback.
-2. Run the replay for the new champion's own training data.
-3. Check the dashboard and logs: which model version served each prediction,
-   before and after the rollback.
 
 ## Related documents
 

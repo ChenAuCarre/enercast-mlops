@@ -50,10 +50,3 @@ def test_replay_fails_when_no_row_is_complete(tmp_path):
 
     assert result.returncode != 0
     assert "no complete rows" in result.stderr
-
-
-def test_replay_rejects_a_shift_without_a_number(tmp_path):
-    result = _replay(tmp_path, [], "--shift", "To")
-
-    assert result.returncode != 0
-    assert "not FEATURE=DELTA" in result.stderr

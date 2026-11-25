@@ -32,9 +32,6 @@ Only for `docker compose up` (Prometheus + Grafana, see [MONITORING.md](MONITORI
 | Variable | Purpose |
 |---|---|
 | `GRAFANA_ADMIN_PASSWORD` | **Required** Grafana admin password (compose refuses to start without it) |
-| `SMTP_ENABLED` | `true` to send alert emails, default `false` |
-| `SMTP_HOST` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` | SMTP server and sender, used when `SMTP_ENABLED=true` |
-| `ALERT_EMAIL_TO` | Alert recipient(s) |
 
 To run the API with Prometheus and Grafana, see [MONITORING.md](MONITORING.md).
 
