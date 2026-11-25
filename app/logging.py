@@ -21,33 +21,10 @@ from app import config
 
 # Attributes owned by logging.LogRecord; anything else found in the record is
 # treated as structured context and copied into the JSON payload.
-_RESERVED_LOG_RECORD_KEYS = frozenset(
-    {
-        "name",
-        "msg",
-        "args",
-        "levelname",
-        "levelno",
-        "pathname",
-        "filename",
-        "module",
-        "exc_info",
-        "exc_text",
-        "stack_info",
-        "lineno",
-        "funcName",
-        "created",
-        "msecs",
-        "relativeCreated",
-        "thread",
-        "threadName",
-        "processName",
-        "process",
-        "taskName",
-        "message",
-        "asctime",
-    }
-)
+_RESERVED_LOG_RECORD_KEYS = frozenset(vars(logging.makeLogRecord({}))) | {
+    "message",
+    "asctime",
+}
 
 _request_id_context: ContextVar[str] = ContextVar("app_request_id", default="")
 
