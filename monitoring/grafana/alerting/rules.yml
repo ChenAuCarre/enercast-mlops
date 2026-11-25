@@ -1,0 +1,67 @@
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: enercast-api
+    folder: EnerCast
+    interval: 10s
+    rules:
+      - uid: api-down
+        title: API down
+        condition: B
+        for: 0s
+        noDataState: Alerting
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: 'up{job="api"}'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: lt, params: [1]}}]
+      - uid: api-error-rate
+        title: Error rate above 5%
+        condition: B
+        for: 0s
+        noDataState: OK
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: 'sum(rate(http_requests_total{path!="/metrics",status=~"5.."}[1m])) / sum(rate(http_requests_total{path!="/metrics"}[1m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: gt, params: [0.05]}}]
+      - uid: api-drift
+        title: Drift above 0.20
+        condition: B
+        for: 0s
+        noDataState: OK
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: 'max(feature_drift_psi)'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: gt, params: [0.2]}}]
