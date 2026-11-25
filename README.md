@@ -36,6 +36,12 @@ flowchart TB
 * **Interactive Swagger UI**: `https://enercast-mlops-tree.onrender.com/docs`
 * **Sample requests, schemas and errors**: [`docs/API.md`](docs/API.md)
 
+Check which model version is serving:
+
+```bash
+curl https://enercast-mlops-tree.onrender.com/model-info
+```
+
 ---
 
 ## Documentation
