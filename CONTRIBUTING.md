@@ -63,7 +63,7 @@ Three long-lived branches, promoted in order:
 3. **Open PRs against `dev`**. Keep them small and focused.
 4. **Promote releases** with a PR from `dev` to `staging`, then from `staging` to `main`. Any other source branch is rejected. Merging to `staging` validates the release candidate; merging to `main` deploys it (see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#workflows-and-the-branches-that-trigger-them)).
 
-Repository rulesets protect `dev`, `staging` and `main`: changes go through a pull request with one approval, force-push and deletion are blocked, and the `ci-pass` check must pass (plus `check-source` on `staging` and `main`).
+Repository rulesets protect `dev`, `staging` and `main`: changes go through a pull request, force-push and deletion are blocked, and the `ci-pass` check must pass. `dev` takes squash merges only (no approval required); `staging` and `main` take merge commits only, with one approval and the `check-source` check.
 
 ---
 
