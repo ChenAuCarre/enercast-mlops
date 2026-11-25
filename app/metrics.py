@@ -24,6 +24,7 @@ prediction_value_wh = Histogram(
     "prediction_value_wh",
     "Predicted appliance energy in Wh served by the champion",
     ["model_version"],
+    buckets=(25, 50, 100, 200, 400, 800, 1600),  # defaults are for seconds
 )
 
 model_info = Gauge(
