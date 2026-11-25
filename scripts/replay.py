@@ -33,6 +33,8 @@ FEATURE_COLUMNS = (
     "Visibility",
     "Tdewpoint",
 )
+# Raw UCI headers, renamed as in ml/preprocess.py.
+RAW_COLUMN_NAMES = {"T_out": "To", "Press_mm_hg": "Pressure"}
 
 
 def main() -> None:
@@ -68,10 +70,16 @@ def main() -> None:
         name, _, delta = item.partition("=")
         if name not in FEATURE_COLUMNS:
             parser.error(f"--shift: unknown feature {name!r}")
-        shifts[name] = float(delta)
+        try:
+            shifts[name] = float(delta)
+        except ValueError:
+            parser.error(f"--shift: {item!r} is not FEATURE=DELTA")
 
     with open(args.file, newline="", encoding="utf-8") as handle:
-        rows = list(csv.DictReader(handle))
+        rows = [
+            {RAW_COLUMN_NAMES.get(key, key): value for key, value in row.items()}
+            for row in csv.DictReader(handle)
+        ]
 
     if not args.ordered:  # a few days of ordered rows differ from the training months
         random.shuffle(rows)
@@ -81,6 +89,8 @@ def main() -> None:
     rows = [row for row in rows if all(row.get(field) for field in fields)][
         : args.limit
     ]
+    if not rows:
+        parser.error(f"no complete rows in {args.file}")
 
     statuses: Counter = Counter()
     for row in rows:
@@ -91,7 +101,7 @@ def main() -> None:
         payload["date"] = row["date"]
 
         if args.broken:
-            payload.pop(FEATURE_COLUMNS[0], None)
+            del payload["lights"]
 
         request = urllib.request.Request(
             args.url,
