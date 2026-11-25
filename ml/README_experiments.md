@@ -260,9 +260,8 @@ In GitHub Actions:
   champion version (or wait for the next promotion) to execute the live
   verification. The job summary states whether the service was verified or
   skipped.
-- `workflow_dispatch` only appears once the workflow file is present on the
-  default branch (`dev`). A first run can therefore validate `v1`, then `v2`,
-  before the inference API exists.
+- Both workflows can only be dispatched once they are on the default branch
+  (`main`), so they run from released code.
 
 ## 10. Decision log and rollback
 
