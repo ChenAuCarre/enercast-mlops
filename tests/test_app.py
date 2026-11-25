@@ -216,7 +216,7 @@ def test_predict_updates_the_feature_drift_gauge(client, monkeypatch):
     monkeypatch.setattr(
         main.holder,
         "training_profile",
-        lambda: {"lights": {"deciles": [0.0, 10.0, 20.0], "mean": 10.0}},
+        lambda: {"features": {"lights": {"deciles": [0.0, 10.0, 20.0], "mean": 10.0}}},
     )
 
     with client() as c:

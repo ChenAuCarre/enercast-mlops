@@ -12,9 +12,23 @@ from app.drift import (
 
 def test_population_stability_index_is_zero_for_an_identical_distribution():
     deciles = [float(value) for value in range(0, 101, 10)]
-    samples = [float(value) for value in range(0, 100, 10)]
+    samples = [float(value) for value in range(5, 100, 10)]  # one per bin
 
     assert population_stability_index(deciles, samples) == 0.0
+
+
+def test_population_stability_index_stays_below_the_threshold_on_the_same_distribution():
+    import random
+
+    rng = random.Random(0)
+    population = [rng.gauss(0, 1) for _ in range(20000)]
+    ordered = sorted(population)
+    deciles = [
+        ordered[min(int(i / 10 * len(ordered)), len(ordered) - 1)] for i in range(11)
+    ]
+    samples = [rng.gauss(0, 1) for _ in range(500)]
+
+    assert population_stability_index(deciles, samples) < DRIFT_THRESHOLD
 
 
 def test_population_stability_index_exceeds_the_threshold_for_a_shifted_distribution():

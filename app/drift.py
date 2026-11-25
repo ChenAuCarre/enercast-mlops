@@ -38,14 +38,15 @@ def population_stability_index(
 
     ``reference_deciles`` summarises the reference distribution with its sorted
     deciles. The comparison uses ``bin_count`` equal-probability bins delimited
-    by the first ``bin_count - 1`` deciles and the ``-inf``/``+inf`` sentinels.
+    by the interior deciles (min and max excluded) and the ``-inf``/``+inf`` sentinels.
     The reference mass of every bin is ``1 / bin_count``.
     """
     values = sorted({float(value) for value in reference_deciles})
     if len(values) < 2 or not samples:
         return 0.0
 
-    internal = [float(value) for value in values[: max(bin_count - 1, 0)]]
+    # Interior cut points only (p10..p90): the first/last deciles are min/max.
+    internal = values[1:-1][: max(bin_count - 1, 0)]
     bounds = [float("-inf")] + internal + [float("inf")]
     bins = len(bounds) - 1
     if bins < 1:
