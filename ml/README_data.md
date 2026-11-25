@@ -122,17 +122,13 @@ https://dagshub.com/MezziNour/enercast-mlops.dvc
 
 | Snapshot | DVC pointer | MD5 | Git commit |
 | --- | --- | --- | --- |
-| raw | `data/raw/energydata_complete.csv.dvc` | `69ef922b5fcafcd49097cfc09e07167e` | `f60ad544c4a3c294847df70f237f698311a1477e` |
-| `v1` | `data/versions/v1/train.csv.dvc` | `b2fc482fe85cd1779a0faa5f7d6de625` | `ac07620abb924c56d2ef32183cd6fec055d1f01a` |
-| `v2` | `data/versions/v2/train.csv.dvc` | `d08e0d2745ace0677a6330d8cc20795a` | `ac07620abb924c56d2ef32183cd6fec055d1f01a` |
-| final test | `data/versions/test/final_test.csv.dvc` | `082db6d3abab0442e8721d732e1db116` | `ac07620abb924c56d2ef32183cd6fec055d1f01a` |
+| raw | `data/raw/energydata_complete.csv.dvc` | `69ef922b5fcafcd49097cfc09e07167e` | `55a871a955d091cbb031e07c272fc812ea4f62ad` |
+| `v1` | `data/versions/v1/train.csv.dvc` | `b2fc482fe85cd1779a0faa5f7d6de625` | `55a871a955d091cbb031e07c272fc812ea4f62ad` |
+| `v2` | `data/versions/v2/train.csv.dvc` | `d08e0d2745ace0677a6330d8cc20795a` | `55a871a955d091cbb031e07c272fc812ea4f62ad` |
+| final test | `data/versions/test/final_test.csv.dvc` | `082db6d3abab0442e8721d732e1db116` | `55a871a955d091cbb031e07c272fc812ea4f62ad` |
 
-Commit `ac07620abb924c56d2ef32183cd6fec055d1f01a` introduced the `v1`, `v2`
-and final-test pointers on branch `feature/mlops-pipeline`; the raw pointer was
-introduced earlier in `f60ad544c4a3c294847df70f237f698311a1477e`. On `dev`, the
-same pointers are present through the squash merge `55a871a` (`#6`), so the
-commit IDs above remain reachable on `feature/mlops-pipeline` while `dev` shows
-`55a871a`. The pipeline reads the MD5 from each `.dvc` pointer and verifies the
+All four pointers entered `dev` in squash merge `55a871a` (#6).
+The pipeline reads the MD5 from each `.dvc` pointer and verifies the
 file bytes before use (`ml/pipeline.py`), so a modified or partially pulled file
 aborts the run.
 
