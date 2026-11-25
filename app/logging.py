@@ -1,66 +1,37 @@
-"""Structured JSON logging for the prediction API.
-
-Every log line emitted by the app is one JSON object written to standard
-output, so logs can be collected, searched and alerted on by tools such as
-``docker compose logs`` + jq or Loki/ELK.
-
-The log level comes from the ``LOG_LEVEL`` environment variable (default
-``INFO``). The request id comes from the ``X-Request-ID`` header (or is
-generated when missing) and is attached to every log line of the request.
-"""
-
-from __future__ import annotations
+"""JSON log lines on stdout for the ``app`` logger, tagged with the request id."""
 
 import json
 import logging
 import sys
 from contextvars import ContextVar
 from datetime import UTC, datetime
-from typing import Any
 
 from app import config
 
-# Attributes owned by logging.LogRecord; anything else found in the record is
-# treated as structured context and copied into the JSON payload.
-_RESERVED_LOG_RECORD_KEYS = frozenset(vars(logging.makeLogRecord({}))) | {
-    "message",
-    "asctime",
-}
+# LogRecord's own attributes; anything else on a record came from `extra=`.
+_RECORD_KEYS = frozenset(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
 
-# Bound by the request middleware; attached to every log line of the request.
-request_id_var: ContextVar[str] = ContextVar("app_request_id", default="")
+# Set by the request middleware for the duration of each request.
+request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 
 
 class JsonFormatter(logging.Formatter):
-    """One JSON object per log line."""
-
-    def format(self, record: logging.LogRecord) -> str:
-        payload: dict[str, Any] = {
+    def format(self, record):
+        payload = {
             "timestamp": datetime.now(UTC).isoformat(timespec="milliseconds"),
             "level": record.levelname.lower(),
             "event": record.getMessage(),
             "logger": record.name,
         }
-
-        for key, value in vars(record).items():
-            if key in _RESERVED_LOG_RECORD_KEYS or key.startswith("_"):
-                continue
-            if callable(value):
-                continue
-            payload[key] = value
-
-        # Context-bound id, unless the call site passed request_id explicitly.
-        if "request_id" not in payload and (request_id := request_id_var.get()):
+        payload |= {k: v for k, v in vars(record).items() if k not in _RECORD_KEYS}
+        if request_id := request_id_var.get():
             payload["request_id"] = request_id
-
         if record.exc_info:
             payload["exc"] = self.formatException(record.exc_info)
-
         return json.dumps(payload, default=str)
 
 
-def configure_logging() -> None:
-    """Send the app logs to stdout as JSON lines."""
+def configure_logging():
     logger = logging.getLogger("app")
     if not any(isinstance(h.formatter, JsonFormatter) for h in logger.handlers):
         handler = logging.StreamHandler(sys.stdout)

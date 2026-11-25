@@ -92,36 +92,18 @@ def evaluate_model(model, X_eval, y_eval):
     return predictions, metrics
 
 
-def build_training_profile(X_train, dataset_version):
-    """Summarize the training features for production drift monitoring.
-
-    The API downloads this artifact from the champion's run and compares the
-    distribution of live predictions with it. Bin edges and training shares
-    are stored so the API can compute a population stability index (PSI) without access to the
-    training data, which is never shipped in the container.
-    """
-    quantiles = [i / 10 for i in range(11)]
+def build_training_profile(X_train):
+    """Drift reference for the API: per feature, bin edges and training share per bin."""
     features = {}
-
     for name in X_train.columns:
         series = X_train[name].astype(float)
-        deciles = series.quantile(quantiles).tolist()
-        # Bins cut at the unique interior deciles, with the real training share of
-        # each bin: repeated values (lights is mostly 0) make the bins unequal.
-        # Bin rule must match app.drift.population_stability_index (bisect_left).
-        edges = sorted(set(deciles[1:-1])) if series.min() < series.max() else []
-        shares = np.bincount(
-            np.searchsorted(edges, series, side="left"), minlength=len(edges) + 1
-        ) / len(series)
-        features[name] = {
-            "bin_edges": [float(value) for value in edges],
-            "bin_shares": [float(value) for value in shares],
-        }
-
-    return {
-        "dataset_version": dataset_version,
-        "features": features,
-    }
+        # Unique interior deciles: repeated values (lights is mostly 0) give unequal bins.
+        edges = sorted(set(series.quantile([i / 10 for i in range(1, 10)]).tolist()))
+        # Same bin rule as app.drift.population_stability_index (bisect_left).
+        bins = np.searchsorted(edges, series, side="left")
+        shares = np.bincount(bins, minlength=len(edges) + 1) / len(series)
+        features[name] = {"bin_edges": edges, "bin_shares": shares.tolist()}
+    return {"features": features}
 
 
 def run_experiment(run_name, config, data):
@@ -221,11 +203,7 @@ def run_experiment(run_name, config, data):
 
             profile_path = temp_path / "training-profile.json"
             profile_path.write_text(
-                json.dumps(
-                    build_training_profile(data["X_train"], dataset_version),
-                    indent=2,
-                ),
-                encoding="utf-8",
+                json.dumps(build_training_profile(data["X_train"])), encoding="utf-8"
             )
 
             mlflow.log_artifact(str(metrics_path))

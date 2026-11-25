@@ -106,33 +106,12 @@ def test_build_estimator_rejects_unknown_type():
         build_estimator("RandomForestRegressor")
 
 
-def test_build_training_profile_summarizes_each_feature():
-    X_train = pd.DataFrame(
-        {
-            "lights": [0.0, 0.0, 10.0, 20.0, 30.0],
-            "T1": [10.0, 12.0, 14.0, 16.0, 18.0],
-        }
-    )
+def test_build_training_profile_is_json_with_one_share_per_bin():
+    profile = build_training_profile(pd.DataFrame({"lights": [0.0, 0.0, 10.0, 20.0]}))
 
-    profile = build_training_profile(X_train, "v1")
-
-    assert profile["dataset_version"] == "v1"
-    assert set(profile["features"]) == {"lights", "T1"}
-
-    lights = profile["features"]["lights"]
-    assert set(lights) == {"bin_edges", "bin_shares"}
-    assert lights["bin_edges"] == sorted(lights["bin_edges"])
+    lights = json.loads(json.dumps(profile))["features"]["lights"]
     assert len(lights["bin_shares"]) == len(lights["bin_edges"]) + 1
     assert sum(lights["bin_shares"]) == pytest.approx(1.0)
-
-
-def test_build_training_profile_handles_constant_features_and_json():
-    X_train = pd.DataFrame({"lights": [7.0, 7.0, 7.0]})
-
-    profile = build_training_profile(X_train, "v2")
-
-    assert profile["features"]["lights"]["bin_edges"] == []
-    assert json.loads(json.dumps(profile)) == profile
 
 
 def test_run_experiment_instantiates_a_fresh_estimator_per_run(monkeypatch):

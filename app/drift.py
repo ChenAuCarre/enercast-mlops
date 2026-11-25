@@ -1,27 +1,13 @@
-"""Champion model drift monitoring.
+"""PSI drift of live prediction features against the champion training profile.
 
-The deployed API compares the distribution of recent predictions with the
-training distribution of the champion, using a Population Stability Index
-(PSI).
-
-The reference distribution comes from the ``training-profile.json`` artifact
-logged by the training run of the champion version (see ``ml.train``); the API
-downloads it each time a champion is loaded (startup and ``/refresh``).
-
-The live distribution is the sliding window of the last predictions per
-feature. Once the window is full, the drift is recomputed every
-``DRIFT_RECOMPUTE_EVERY`` predictions; features above ``DRIFT_THRESHOLD`` are
-logged by the API and alerted on by Grafana.
+The reference is the ``training-profile.json`` artifact logged by ``ml.train``:
+per feature, the bin edges and the training share of each bin.
 """
-
-from __future__ import annotations
 
 import bisect
 import math
 import threading
 from collections import deque
-from collections.abc import Mapping, Sequence
-from typing import Any
 
 DRIFT_THRESHOLD = 0.20
 # shortcut: 500 time-ordered readings (10 min apart) cover ~3.5 days, compared
@@ -32,84 +18,59 @@ DRIFT_RECOMPUTE_EVERY = 100
 PSI_FLOOR = 1e-4  # empty bins would make log() infinite
 
 
-def population_stability_index(
-    bin_edges: Sequence[float],
-    bin_shares: Sequence[float],
-    samples: Sequence[float],
-) -> float:
-    """Compute the PSI of ``samples`` against the training share of each bin.
+def population_stability_index(bin_edges, bin_shares, samples):
+    """PSI of ``samples`` against the training share of each bin.
 
-    Bin ``i`` holds the values in ``(bin_edges[i-1], bin_edges[i]]``, the same
-    rule (``bisect_left``) ``ml.train.build_training_profile`` used to compute
-    ``bin_shares``.
+    Same bin rule (``bisect_left``) as ``ml.train.build_training_profile``.
     """
-    if not samples:
-        return 0.0
-
     counts = [0] * len(bin_shares)
     for sample in samples:
-        counts[bisect.bisect_left(bin_edges, float(sample))] += 1
+        counts[bisect.bisect_left(bin_edges, sample)] += 1
 
-    psi_value = 0.0
+    psi = 0.0
     for count, expected in zip(counts, bin_shares, strict=True):
         observed = max(count / len(samples), PSI_FLOOR)
-        expected = max(float(expected), PSI_FLOOR)
-        psi_value += (observed - expected) * math.log(observed / expected)
-
-    return psi_value
+        expected = max(expected, PSI_FLOOR)
+        psi += (observed - expected) * math.log(observed / expected)
+    return psi
 
 
 class DriftTracker:
-    """Sliding-window drift tracker fed with live prediction features."""
+    """Sliding window of live features; PSI per feature once the window is full."""
 
     def __init__(
-        self,
-        reference: Mapping[str, Any] | None = None,
-        window_size: int = DRIFT_WINDOW_SIZE,
-        recompute_every: int = DRIFT_RECOMPUTE_EVERY,
-    ) -> None:
+        self, window_size=DRIFT_WINDOW_SIZE, recompute_every=DRIFT_RECOMPUTE_EVERY
+    ):
         self._window_size = window_size
         self._recompute_every = recompute_every
         self._lock = threading.Lock()
-        self._reset(reference)
+        self.configure({})
 
-    def configure(self, reference: Mapping[str, Any] | None) -> None:
-        """(Re)configure the tracker with a champion training profile."""
+    def configure(self, reference):
+        """Start a new window against ``reference`` (feature -> bins); {} disables."""
         with self._lock:
-            self._reset(reference)
+            self._reference = reference
+            self._buffers = {
+                name: deque(maxlen=self._window_size) for name in reference
+            }
+            self._observations = 0
 
-    def _reset(self, reference: Mapping[str, Any] | None) -> None:
-        self._reference = dict(reference) if reference else None
-        self._buffers: dict[str, deque] = {
-            name: deque(maxlen=self._window_size) for name in (self._reference or {})
-        }
-        self._observations = 0
-
-    def observe(self, values: Mapping[str, float]) -> dict[str, float] | None:
-        """Append one prediction's features; return the drifts when recomputed."""
+    def observe(self, values):
+        """Add one prediction's features; return the PSI per feature when recomputed."""
         with self._lock:
             self._observations += 1
-            for name, value in values.items():
-                buffer = self._buffers.get(name)
-                if buffer is None:
-                    continue
-                buffer.append(float(value))
-
-            # A partial window gives noisy PSI: wait until it is full.
+            for name, buffer in self._buffers.items():
+                buffer.append(values[name])
             if (
                 self._observations >= self._window_size
                 and self._observations % self._recompute_every == 0
             ):
-                return self._compute()
+                return {
+                    name: population_stability_index(
+                        self._reference[name]["bin_edges"],
+                        self._reference[name]["bin_shares"],
+                        buffer,
+                    )
+                    for name, buffer in self._buffers.items()
+                }
             return None
-
-    def _compute(self) -> dict[str, float]:
-        # Buffers exist only for features of the reference (none when disabled).
-        return {
-            name: population_stability_index(
-                self._reference[name]["bin_edges"],
-                self._reference[name]["bin_shares"],
-                list(buffer),
-            )
-            for name, buffer in self._buffers.items()
-        }

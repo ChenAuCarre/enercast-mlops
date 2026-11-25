@@ -43,13 +43,7 @@ class ChampionHolder:
         self.state = (model, info)
 
     def training_profile(self) -> dict | None:
-        """Return the training profile of the loaded champion version.
-
-        The profile is the ``training-profile.json`` artifact logged by the
-        training run that produced the champion version. When it is missing (for
-        example an older champion trained before the artifact existed) the
-        drift monitoring stays disabled instead of failing the service.
-        """
+        """The champion run's ``training-profile.json``; None when absent (older runs)."""
         info = self.info
         if info is None:
             return None

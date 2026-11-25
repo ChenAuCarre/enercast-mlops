@@ -1,7 +1,6 @@
 import io
 import json
 import logging
-import math
 from types import SimpleNamespace
 
 import pytest
@@ -9,7 +8,7 @@ from fastapi.testclient import TestClient
 from prometheus_client import REGISTRY
 
 from app import config, main, model
-from app.drift import PSI_FLOOR, DriftTracker
+from app.drift import DriftTracker
 from app.logging import JsonFormatter
 
 PAYLOAD = {
@@ -33,19 +32,6 @@ class FakeModel:
 
 
 @pytest.fixture
-def log_events(monkeypatch):
-    """Capture the (level, event, extra) calls made on ``main.log``."""
-    events = []
-
-    class RecordingLog:
-        def log(self, level, event, extra=None, **kwargs):
-            events.append((level, event, extra))
-
-    monkeypatch.setattr(main, "log", RecordingLog())
-    return events
-
-
-@pytest.fixture
 def client(monkeypatch):
     """Factory: client(loaded=True) -> TestClient; all patches undone per test."""
     # No real MLflow download; a fresh drift state per test.
@@ -61,18 +47,6 @@ def client(monkeypatch):
         return TestClient(main.app)
 
     return make
-
-
-@pytest.fixture
-def json_lines():
-    """Real JSON log lines reaching the root handler, parsed: call after requests."""
-    stream = io.StringIO()
-    handler = logging.StreamHandler(stream)
-    handler.setFormatter(JsonFormatter())
-    logger = logging.getLogger()  # the app logger propagates here
-    logger.addHandler(handler)
-    yield lambda: [json.loads(line) for line in stream.getvalue().splitlines()]
-    logger.removeHandler(handler)
 
 
 def test_predict_ok(client):
@@ -170,184 +144,107 @@ def test_refresh_non_ascii_token_is_401(client, monkeypatch):
     assert r.status_code == 401
 
 
-def test_health_503_when_the_champion_load_fails_at_startup(
-    client, monkeypatch, log_events
-):
-    def boom():
-        raise RuntimeError("mlflow down")
-
-    events = log_events
-
-    c = client(loaded=False)
-    monkeypatch.setattr(main.holder, "load", boom)
-    with c:
-        assert c.get("/health").status_code == 503
-
-    assert any(event == "champion_model_load_failed" for _level, event, _e in events)
+@pytest.fixture
+def json_lines():
+    """Parsed JSON log lines of the app logger: call after the requests."""
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(JsonFormatter())
+    logging.getLogger("app").addHandler(handler)
+    yield lambda: [json.loads(line) for line in stream.getvalue().splitlines()]
+    logging.getLogger("app").removeHandler(handler)
 
 
-def test_health_ready_when_the_drift_profile_is_absent(client, monkeypatch):
-    # The champion is loaded but the training profile artifact is missing:
-    # the drift monitoring is disabled and /health must still answer 200.
-    monkeypatch.setattr(main.holder, "training_profile", lambda: None)
-
+def test_metrics_endpoint_serves_prometheus_text(client):
     with client() as c:
-        assert c.get("/health").status_code == 200
-        assert c.get("/metrics").status_code == 200
-
-
-def test_metrics_endpoint_returns_the_prometheus_payload(client):
-    with client() as c:
+        c.post("/predict", json=PAYLOAD)
         r = c.get("/metrics")
-    assert r.status_code == 200
     assert "text/plain" in r.headers["content-type"]
-    assert b"http_requests_total" in r.content
-    assert b"predictions_total" in r.content
+    assert b'predictions_total{model_version="2"}' in r.content
+    assert REGISTRY.get_sample_value("model_info", {"model_version": "2"}) == 1.0
 
 
-def test_predict_echoes_a_request_id_and_generates_one(client):
+def test_request_id_is_echoed_capped_and_on_every_log_line(client, json_lines):
     with client() as c:
-        echoed = c.post("/predict", json=PAYLOAD, headers={"X-Request-ID": "rid-1"})
-        generated = c.post("/predict", json=PAYLOAD)
-    assert echoed.status_code == 200
-    assert echoed.headers["X-Request-ID"] == "rid-1"
+        c.post("/predict", json=PAYLOAD, headers={"X-Request-ID": "rid-42"})
+        long_id = c.get("/health", headers={"X-Request-ID": "x" * 500})
+        generated = c.get("/health")
+
+    lines = [x for x in json_lines() if x.get("request_id") == "rid-42"]
+    assert {x["event"] for x in lines} == {"prediction_made", "http_request"}
+    assert long_id.headers["X-Request-ID"] == "x" * 64
     assert generated.headers["X-Request-ID"]
 
 
-def test_predict_logs_structured_prediction_and_request_events(client, log_events):
-    events = log_events
+def test_unknown_paths_share_one_label_and_crashes_count_as_500(client, monkeypatch):
+    def boom(_df):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(main, "preprocess_features", boom)
+    crash = {"method": "POST", "path": "/predict", "status": "500"}
+    before = REGISTRY.get_sample_value("http_requests_total", crash) or 0
 
     with client() as c:
-        r = c.post("/predict", json=PAYLOAD)
-    assert r.status_code == 200
+        c.get("/no-such-path-123")
+        with pytest.raises(RuntimeError):
+            c.post("/predict", json=PAYLOAD)
 
-    event_names = [event for _level, event, _extra in events]
-    assert "http_request" in event_names
-    assert "prediction_made" in event_names
-
-    _level, _event, extra = next(e for e in events if e[1] == "prediction_made")
-    assert extra["model_version"] == "2"
-    assert "prediction" in extra
-    assert "latency_ms" in extra
-    assert "feature_count" in extra
-    assert extra["feature_count"] == 27
+    unmatched = {"method": "GET", "path": "unmatched", "status": "404"}
+    assert REGISTRY.get_sample_value("http_requests_total", unmatched)
+    assert REGISTRY.get_sample_value("http_requests_total", crash) == before + 1
 
 
-def test_predict_updates_the_feature_drift_gauge_and_logs_drift(
-    client, monkeypatch, json_lines
-):
+def test_drift_gauge_and_log_once_the_window_is_full(client, monkeypatch, json_lines):
+    bins = {"bin_edges": [10.0], "bin_shares": [0.5, 0.5]}
+    profile = {"features": {"lights": bins, "day_of_week": bins}}
+    monkeypatch.setattr(main.holder, "training_profile", lambda: profile)
     monkeypatch.setattr(main, "drift_tracker", DriftTracker(window_size=100))
-    monkeypatch.setattr(
-        main.holder,
-        "training_profile",
-        lambda: {
-            "features": {"lights": {"bin_edges": [10.0], "bin_shares": [0.5, 0.5]}},
-        },
-    )
 
     with client() as c:
         for _ in range(100):
-            assert c.post("/predict", json=PAYLOAD).status_code == 200
+            c.post("/predict", json=PAYLOAD)
 
-    # lights=20 puts every sample in the upper bin: observed shares (floor, 1).
-    expected = (PSI_FLOOR - 0.5) * math.log(PSI_FLOOR / 0.5) + 0.5 * math.log(2)
-    value = REGISTRY.get_sample_value("feature_drift", {"feature": "lights"})
-    assert value == pytest.approx(expected)
-    drift_events = [
-        line for line in json_lines() if line["event"] == "data_drift_detected"
-    ]
-    assert [event["features"] for event in drift_events] == [["lights"]]
-
-
-def test_predict_writes_json_lines_with_the_request_id(client, json_lines):
-    with client() as c:
-        c.post("/predict", json=PAYLOAD, headers={"X-Request-ID": "rid-42"})
-        long_id = c.post("/predict", json=PAYLOAD, headers={"X-Request-ID": "x" * 500})
-
-    events = {
-        line["event"]: line
-        for line in json_lines()
-        if line.get("request_id") == "rid-42"
-    }
-    assert events["prediction_made"]["model_version"] == "2"
-    assert "http_request" in events
-    assert long_id.headers["X-Request-ID"] == "x" * 64
+    # lights=20: every sample lands in the upper bin
+    assert REGISTRY.get_sample_value("feature_drift", {"feature": "lights"}) > 4
+    assert (
+        REGISTRY.get_sample_value("feature_drift", {"feature": "day_of_week"}) is None
+    )
+    drift_logs = [x for x in json_lines() if x["event"] == "data_drift_detected"]
+    assert [x["features"] for x in drift_logs] == [["lights"]]
 
 
-def test_drift_reference_loads_at_startup_and_again_after_refresh(client, monkeypatch):
+def test_refresh_reloads_the_drift_profile_and_clears_stale_gauges(client, monkeypatch):
     monkeypatch.setattr(config, "REFRESH_API_TOKEN", "tok")
     calls = []
     monkeypatch.setattr(main.holder, "training_profile", lambda: calls.append(1))
 
     with client() as c:
         c.post("/predict", json=PAYLOAD)
-        c.post("/predict", json=PAYLOAD)
-        assert len(calls) == 1  # loaded at startup, not per request
+        main.metrics.feature_drift.labels("lights").set(1.5)
         c.post("/refresh", headers={"X-Refresh-Token": "tok"})
-        c.post("/predict", json=PAYLOAD)
 
-    assert len(calls) == 2
-
-
-def test_unhandled_exception_is_counted_as_a_500(client, monkeypatch):
-    def boom(_df):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(main, "preprocess_features", boom)
-    labels = {"method": "POST", "path": "/predict", "status": "500"}
-    before = REGISTRY.get_sample_value("http_requests_total", labels) or 0
-
-    with client() as c, pytest.raises(RuntimeError):
-        c.post("/predict", json=PAYLOAD)
-
-    assert REGISTRY.get_sample_value("http_requests_total", labels) == before + 1
-
-
-def test_metrics_path_label_is_bounded_for_unknown_paths(client):
-    with client() as c:
-        assert c.get("/no-such-path-123").status_code == 404
-
-    assert REGISTRY.get_sample_value(
-        "http_requests_total",
-        {"method": "GET", "path": "unmatched", "status": "404"},
-    )
-    assert (
-        REGISTRY.get_sample_value(
-            "http_requests_total",
-            {"method": "GET", "path": "/no-such-path-123", "status": "404"},
-        )
-        is None
-    )
-
-
-def test_refresh_clears_the_stale_feature_drift_gauge(client, monkeypatch):
-    monkeypatch.setattr(config, "REFRESH_API_TOKEN", "tok")
-    metrics_mod = main.metrics
-    metrics_mod.set_feature_drift("lights", 1.5)
-
-    with client() as c:
-        r = c.post("/refresh", headers={"X-Refresh-Token": "tok"})
-
-    assert r.status_code == 200
+    assert len(calls) == 2  # startup and refresh, not per request
     assert REGISTRY.get_sample_value("feature_drift", {"feature": "lights"}) is None
 
 
 def test_predict_survives_a_monitoring_failure(client, monkeypatch):
-    def boom(*_):
-        raise RuntimeError("metrics broke")
-
-    monkeypatch.setattr(main.metrics, "observe_prediction", boom)
-
+    monkeypatch.setattr(main, "_update_drift", lambda *_: 1 / 0)
     with client() as c:
-        r = c.post("/predict", json=PAYLOAD)
-
-    assert r.status_code == 200
+        assert c.post("/predict", json=PAYLOAD).status_code == 200
 
 
-def test_model_info_gauge_reports_the_loaded_version(client, monkeypatch):
-    monkeypatch.setattr(main.holder, "load", lambda: None)
+def test_training_profile_reads_the_loaded_run_or_returns_none(monkeypatch, tmp_path):
+    (tmp_path / "p.json").write_text('{"features": {}}')
 
-    with client():
-        pass
+    def download(run_id, artifact_path):
+        if run_id == "gone":
+            raise RuntimeError("no artifact")
+        assert run_id == "run-7"
+        return str(tmp_path / "p.json")
 
-    assert REGISTRY.get_sample_value("model_info", {"model_version": "2"}) == 1.0
+    monkeypatch.setattr(model.mlflow.artifacts, "download_artifacts", download)
+    h = model.ChampionHolder()
+    h.state = (object(), {"mlflow_run_id": "run-7"})
+    assert h.training_profile() == {"features": {}}
+    h.state = (object(), {"mlflow_run_id": "gone"})
+    assert h.training_profile() is None

@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
-from prometheus_client import CONTENT_TYPE_LATEST
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app import config, metrics
 from app import logging as app_logging
@@ -25,34 +25,29 @@ drift_tracker = DriftTracker()
 DRIFT_IGNORED_FEATURES = {"day_of_week"}
 
 
-def _load_drift_reference():
-    # Called after each successful champion load; no profile -> drift stays off.
-    profile = holder.training_profile() or {}
-    reference = {
-        name: stats
-        for name, stats in profile.get("features", {}).items()
-        if name not in DRIFT_IGNORED_FEATURES
-    }
-    drift_tracker.configure(reference)
-    metrics.clear_feature_drift()  # no stale gauge values from the old reference
-    log.log(
-        logging.INFO if reference else logging.WARNING,
-        "drift_profile_loaded" if reference else "drift_profile_missing",
-        extra={"model_version": holder.version},
+def _on_champion_loaded():
+    metrics.model_info.clear()  # one series: the loaded version
+    metrics.model_info.labels(str(holder.version)).set(1)
+    profile = holder.training_profile() or {}  # no profile -> drift stays off
+    drift_tracker.configure(
+        {
+            name: bins
+            for name, bins in profile.get("features", {}).items()
+            if name not in DRIFT_IGNORED_FEATURES
+        }
     )
+    metrics.feature_drift.clear()  # no stale values from the old reference
 
 
 def _update_drift(version, X):
-    drift = drift_tracker.observe({name: float(X.iloc[0][name]) for name in X.columns})
-    if drift is None:
-        return
+    drift = drift_tracker.observe(X.iloc[0].to_dict()) or {}
     for name, value in drift.items():
-        metrics.set_feature_drift(name, value)
-    if drifted := sorted(name for name, v in drift.items() if v > DRIFT_THRESHOLD):
-        log.log(
-            logging.WARNING,
-            "data_drift_detected",
-            extra={"model_version": version, "features": drifted},
+        metrics.feature_drift.labels(name).set(value)
+    if drifted := sorted(
+        name for name, value in drift.items() if value > DRIFT_THRESHOLD
+    ):
+        log.warning(
+            "data_drift_detected", extra={"model_version": version, "features": drifted}
         )
 
 
@@ -61,24 +56,10 @@ async def lifespan(_):
     app_logging.configure_logging()
     try:
         holder.load()
-        metrics.set_model_info(holder.version)
-        log.log(
-            logging.INFO,
-            "model_loaded",
-            extra={"model_version": holder.version},
-        )
     except Exception:  # start anyway; /health reports 503 until a refresh works
-        # Surface the failure through a structured event so that the container
-        # logs (and the CI smoke test `docker logs` dump) pinpoint the cause
-        # without parsing a free-form traceback message.
-        log.log(
-            logging.ERROR,
-            "champion_model_load_failed",
-            extra={"model_version": holder.version},
-            exc_info=True,
-        )
+        log.exception("Champion model failed to load at startup")
     else:
-        _load_drift_reference()
+        _on_champion_loaded()
     yield
 
 
@@ -89,11 +70,9 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 @app.middleware("http")
-async def request_logging(request: Request, call_next):
+async def observe_request(request: Request, call_next):
     # Capped: the id is echoed and logged, a client must not inflate every line.
-    request_id = (request.headers.get("X-Request-ID") or "")[:64] or uuid.uuid4().hex[
-        :12
-    ]
+    request_id = request.headers.get("X-Request-ID", "")[:64] or uuid.uuid4().hex[:12]
     token = app_logging.request_id_var.set(request_id)
     start = time.perf_counter()
     status = 500  # stays 500 if call_next raises, so crashes are still counted
@@ -103,24 +82,20 @@ async def request_logging(request: Request, call_next):
         response.headers["X-Request-ID"] = request_id
         return response
     finally:
-        duration_seconds = time.perf_counter() - start
+        duration = time.perf_counter() - start
+        route = request.scope.get("route")  # template, so 404 scans can't mint labels
+        path = route.path if route else "unmatched"
+        metrics.http_requests_total.labels(request.method, path, str(status)).inc()
+        metrics.http_request_duration_seconds.labels(path).observe(duration)
         log.log(
             logging.ERROR if status >= 500 else logging.INFO,
             "http_request",
             extra={
-                "request_id": request_id,
                 "method": request.method,
                 "path": request.url.path,
                 "status": status,
-                "duration_ms": round(duration_seconds * 1000, 3),
+                "duration_ms": round(duration * 1000, 3),
             },
-        )
-        route = request.scope.get("route")  # template, so 404 scans can't mint labels
-        metrics.observe_http_request(
-            method=request.method,
-            path=route.path if route else "unmatched",
-            status=status,
-            duration_seconds=duration_seconds,
         )
         app_logging.request_id_var.reset(token)
 
@@ -153,10 +128,7 @@ def model_info():
 
 @app.get("/metrics")
 def metrics_endpoint():
-    return Response(
-        content=metrics.render_metrics(),
-        media_type=CONTENT_TYPE_LATEST,
-    )
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.post("/predict", response_model=PredictResponse)
@@ -165,28 +137,18 @@ def predict(req: PredictRequest):
     if state is None:
         raise HTTPException(503, "Champion model not loaded")
     model, info = state
-    start = time.perf_counter()
     X = preprocess_features(pd.DataFrame([req.model_dump()]))
     y = float(model.predict(X)[0])
-    latency_ms = round((time.perf_counter() - start) * 1000, 3)
-
+    version = str(info["resolved_version"])
+    log.info(
+        "prediction_made", extra={"model_version": version, "prediction": round(y, 2)}
+    )
     try:  # monitoring must never fail a prediction
-        metrics.observe_prediction(str(info["resolved_version"]), y)
-        _update_drift(info["resolved_version"], X)
+        metrics.predictions_total.labels(version).inc()
+        metrics.prediction_value_wh.labels(version).observe(y)
+        _update_drift(version, X)
     except Exception:
         log.exception("monitoring_update_failed")
-
-    log.log(
-        logging.INFO,
-        "prediction_made",
-        extra={
-            "model_version": str(info["resolved_version"]),
-            "prediction": round(y, 2),
-            "latency_ms": latency_ms,
-            "feature_count": int(X.shape[1]),
-        },
-    )
-
     return PredictResponse(
         predicted_appliances_wh=round(y, 2),
         model_name=info["model_name"],
@@ -209,18 +171,7 @@ def refresh(x_refresh_token: str = Header(default="")):
         log.exception("Refresh failed; keeping previous model")
         raise HTTPException(502, "Refresh failed; see server logs") from exc
 
-    metrics.set_model_info(holder.version)
-    _load_drift_reference()
-
-    log.log(
-        logging.INFO,
-        "model_refreshed",
-        extra={
-            "from_version": previous,
-            "to_version": holder.version,
-        },
-    )
-
+    _on_champion_loaded()
     return RefreshResponse(
         status="refreshed", previous_version=previous, current_version=holder.version
     )
