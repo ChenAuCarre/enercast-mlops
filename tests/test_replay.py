@@ -43,10 +43,8 @@ def test_replay_sends_rows_with_raw_uci_headers(tmp_path):
     assert json.loads(result.stdout) == {"responses_by_status": {"unreachable": 2}}
 
 
-def test_replay_fails_when_no_row_is_complete(tmp_path):
-    row = ["2016-01-11 17:00:00", *["1.0"] * (len(RAW_HEADER) - 2), ""]
-
-    result = _replay(tmp_path, [row])
+def test_replay_fails_without_rows(tmp_path):
+    result = _replay(tmp_path, [])
 
     assert result.returncode != 0
-    assert "no complete rows" in result.stderr
+    assert "no rows" in result.stderr

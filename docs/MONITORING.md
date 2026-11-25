@@ -1,127 +1,65 @@
-# Monitoring, Observability and Alerting
+# Monitoring
 
-This document describes the monitoring of the WattWise prediction API: structured
-logs, Prometheus metrics, data drift, and alerting. It adapts the monitoring
-exercise to the WattWise architecture (energy forecasting regression instead of
-the bank-marketing classification of the exercise).
+The prediction API emits JSON logs, Prometheus metrics and a data drift score;
+`docker compose` runs it with Prometheus and Grafana (dashboard and alerts).
 
-## Overview
+## Logs
 
-The deployed API exposes three monitoring concerns:
-
-1. **Structured logs** — every line emitted by the app is one JSON object written
-   to standard output.
-2. **Metrics** — the API serves Prometheus metrics at `GET /metrics`.
-3. **Data drift** — live predictions are compared with the champion training
-   profile using a Population Stability Index (PSI).
-
-The champion training profile (`training-profile.json`) is logged by the
-training run (`ml.train`) from the training features; the API downloads it from
-the MLflow run of the champion version when it loads the champion (at startup
-and after a `/refresh`).
-
-## Structured logs
-
-- Log level comes from the `LOG_LEVEL` environment variable (default `INFO`).
-- Every line is one JSON object, for example:
+The `app` logger writes one JSON object per line on stdout, at `LOG_LEVEL` (default `INFO`):
 
 ```json
-{"timestamp":"2026-11-25T13:11:16.722+00:00","level":"info","event":"prediction_made","logger":"app","request_id":"5c9be2c025fc","model_version":"2","prediction":114.62,"latency_ms":4.167,"feature_count":27}
+{"timestamp":"2026-11-25T13:11:16.722+00:00","level":"info","event":"prediction_made","logger":"app","model_version":"2","prediction":114.62,"request_id":"5c9be2c025fc"}
 ```
 
-- Request lifecycle events: `http_request` (method, path, status, duration_ms) and
-  `prediction_made` (model_version, prediction, latency_ms, feature_count).
-- Model lifecycle events: `model_loaded`, `champion_model_load_failed`,
-  `drift_profile_loaded`, `drift_profile_missing`, `model_refreshed`.
-- Drift event: `data_drift_detected` (warning, with the `features` above the threshold)
-  at each recompute where a feature drifted.
-- 5xx responses are logged with level `error`.
-- The request id comes from the `X-Request-ID` header (generated when missing) and
-  is echoed in the response and attached to every log line of the request.
-
-Inspect logs with Docker:
+- `http_request` (method, path, status, duration_ms) per request, level `error` for 5xx.
+- `prediction_made` (model_version, prediction) per prediction.
+- `data_drift_detected` (warning, the `features` above the threshold).
+- `request_id` comes from the `X-Request-ID` header (generated when missing, capped
+  at 64 characters) and is echoed in the response.
 
 ```bash
 docker compose logs api --no-log-prefix | jq -R -c 'fromjson? | select(.level == "error")'
 ```
 
-## Metrics
+## Metrics (`GET /metrics`)
 
-The API serves its metrics at `GET /metrics` through `prometheus_client`.
-
-| Metric | Type | Labels / meaning |
+| Metric | Type | Labels |
 |---|---|---|
 | `http_requests_total` | Counter | `method`, `path` (route template, `unmatched` for unknown paths), `status` |
 | `http_request_duration_seconds` | Histogram | `path` |
 | `predictions_total` | Counter | `model_version` |
-| `prediction_value_wh` | Histogram | `model_version` (predicted appliance energy in Wh) |
-| `model_info` | Gauge | `model_version` of the loaded champion, value 1; no series until a model loads |
-| `feature_drift` | Gauge | `feature` (PSI against the champion training profile) |
+| `prediction_value_wh` | Histogram | `model_version` |
+| `model_info` | Gauge | `model_version` of the loaded champion (value 1) |
+| `feature_drift` | Gauge | `feature`: PSI against the champion training profile |
 
 ## Data drift
 
-- Reference: `training-profile.json` artifact of the champion version
-  (per feature: bin edges and the real training share of each bin).
-- Live distribution: last 500 predictions per feature (`DRIFT_WINDOW_SIZE`).
-- Recomputed every 100 predictions (`DRIFT_RECOMPUTE_EVERY`) once the window is
-  full, so the first value appears after 500 predictions.
-- Threshold: `DRIFT_THRESHOLD = 0.20` (PSI).
+- Reference: the `training-profile.json` artifact of the champion's training run
+  (per feature: bin edges and training share of each bin), downloaded at startup
+  and after `/refresh`. Without it drift is off and the API keeps serving.
+- PSI over the last 500 predictions, recomputed every 100 once the window is full.
+  Threshold 0.20.
 - `day_of_week` is not tracked: a 3.5-day window never holds all 7 weekdays.
-- When the champion has no training profile, drift monitoring is disabled and a
-  `drift_profile_missing` warning is logged; the service keeps
-  serving.
 
 ## Stack
 
 ```bash
 docker compose up --build -d
-docker compose ps
-docker compose logs api --no-log-prefix
-```
-
-- API: http://localhost:8000
-- Prometheus: http://localhost:9090/targets
-- Grafana: http://localhost:3000 (user `admin`, password `GRAFANA_ADMIN_PASSWORD`, required)
-
-All ports are bound to `127.0.0.1`.
-
-## Replay
-
-```bash
-python scripts/replay.py --file data/versions/v2/train.csv --url http://localhost:8000/predict --limit 20
 python scripts/replay.py --file data/versions/v2/train.csv --rate 5 --limit 1200
 ```
 
-Rows are shuffled: about 3.5 days of time-ordered rows look different from
-months of training data and trip the drift alert.
+- API http://localhost:8000, Prometheus http://localhost:9090/targets,
+  Grafana http://localhost:3000 (user `admin`, password `GRAFANA_ADMIN_PASSWORD`, required).
+- Ports are bound to `127.0.0.1`.
+- `replay.py` shuffles rows: a few days of time-ordered rows read as drift.
 
-## Alerts
+Dashboard `WattWise API`: requests per second, 5xx share, p95 latency (without
+`/metrics`), predictions per model version, drift per feature, served model version.
 
-The Grafana alerting rules provisioned in `monitoring/grafana-alerting.yml`:
+Alerts (`monitoring/grafana-alerting.yml`):
 
-1. API down: the Prometheus scrape of the API (`up{job="api"}`) has failed for 1 minute (no data counts as down).
-2. High error rate: more than 5% of all API requests (including `/health` checks and
-   Prometheus scrapes) failed with a 5xx status
-   over 2 minutes.
-3. Data drift: a feature drifted above 0.20 PSI for 2 minutes while predictions are
-   flowing (the gauge keeps its last value when traffic stops; the rule ignores it then).
-
-The no-data state is set to `OK` (shown as Normal) for the error-rate and drift rules so that
-restarts of the API do not fire false alerts.
-
-## Dashboard
-
-The dashboard `WattWise API` (provisioned JSON) contains:
-
-1. Requests per second.
-2. Share of requests that failed (5xx), in %.
-3. 95th percentile latency.
-4. Predictions per model version.
-5. Drift per feature, with a threshold line at 0.20.
-6. The model version currently served.
-
-## Related documents
-
-- [`../docs/API.md`](API.md) - endpoint contract.
-- [`../docs/DEPLOYMENT.md`](DEPLOYMENT.md) - deployments and workflows.
-- [`../ml/README_experiments.md`](../ml/README_experiments.md) - promotion evidence.
+1. API down: `up{job="api"}` below 1 (or no data) for 1 minute.
+2. Error rate: more than 5% 5xx over 2 minutes. It counts `/health` 503s on purpose:
+   with no champion loaded the scrape still succeeds, so this is the alert that fires.
+3. Drift: a feature above 0.20 PSI for 2 minutes, only while predictions flow
+   (the gauge keeps its last value after traffic stops).
