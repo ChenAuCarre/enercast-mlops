@@ -10,6 +10,8 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
+from ml.drift import DISTRIBUTION_ARTIFACT, training_distribution
+
 EXPERIMENT_NAME = "WattWise-energy-forecasting-final"
 
 # Version used by the fallback entry point `python -m ml.train`.
@@ -188,6 +190,8 @@ def run_experiment(run_name, config, data):
 
             mlflow.log_artifact(str(metrics_path))
             mlflow.log_artifact(str(validation_predictions_path))
+
+        mlflow.log_dict(training_distribution(data["X_train"]), DISTRIBUTION_ARTIFACT)
 
         print(f"\n--- {run_name} ---")
         print(f"Run ID: {run.info.run_id}")
