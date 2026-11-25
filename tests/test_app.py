@@ -270,3 +270,19 @@ def test_metrics_path_label_is_bounded_for_unknown_paths(client):
         )
         is None
     )
+
+
+def test_client_errors_are_logged_as_warnings_not_errors(client, monkeypatch):
+    events = []
+
+    class RecordingLog:
+        def log(self, level, event, extra=None, **kwargs):
+            events.append((level, event, extra))
+
+    monkeypatch.setattr(main, "log", RecordingLog())
+
+    with client() as c:
+        assert c.post("/predict", json={**PAYLOAD, "RH_1": 101}).status_code == 422
+
+    level, _, _ = next(e for e in events if e[1] == "http_request")
+    assert level == main.logging.WARNING

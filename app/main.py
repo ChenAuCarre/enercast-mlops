@@ -90,7 +90,11 @@ async def request_logging(request: Request, call_next):
     finally:
         duration_seconds = time.perf_counter() - start
         log.log(
-            logging.ERROR if status >= 400 else logging.INFO,
+            logging.ERROR
+            if status >= 500
+            else logging.WARNING
+            if status >= 400
+            else logging.INFO,
             "http_request",
             extra={
                 "request_id": request_id,
