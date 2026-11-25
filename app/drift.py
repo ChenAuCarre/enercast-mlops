@@ -25,49 +25,34 @@ from typing import Any
 DRIFT_THRESHOLD = 0.20
 DRIFT_WINDOW_SIZE = 500
 DRIFT_WINDOW_RESET_EVERY = 100
-DRIFT_BIN_COUNT = 10
+PSI_FLOOR = 1e-4  # empty bins would make log() infinite
 
 
 def population_stability_index(
-    reference_deciles: Sequence[float],
+    bin_edges: Sequence[float],
+    bin_shares: Sequence[float],
     samples: Sequence[float],
-    bin_count: int = DRIFT_BIN_COUNT,
 ) -> float:
-    """Compute the PSI between a reference distribution and a sample.
+    """Compute the PSI of ``samples`` against the training share of each bin.
 
-    ``reference_deciles`` summarises the reference distribution with its sorted
-    deciles. The comparison uses ``bin_count`` equal-probability bins delimited
-    by the interior deciles (min and max excluded) and the ``-inf``/``+inf`` sentinels.
-    The reference mass of every bin is ``1 / bin_count``.
+    Bin ``i`` holds the values in ``(bin_edges[i-1], bin_edges[i]]``, the same
+    rule (``bisect_left``) ``ml.train.build_training_profile`` used to compute
+    ``bin_shares``.
     """
-    values = sorted({float(value) for value in reference_deciles})
-    if len(values) < 2 or not samples:
+    if not samples:
         return 0.0
 
-    # Interior cut points only (p10..p90): the first/last deciles are min/max.
-    internal = values[1:-1][: max(bin_count - 1, 0)]
-    bounds = [float("-inf")] + internal + [float("inf")]
-    bins = len(bounds) - 1
-
-    counts = [0] * bins
-    n = len(samples)
+    counts = [0] * len(bin_shares)
     for sample in samples:
-        index = bisect.bisect_left(bounds, float(sample)) - 1
-        index = max(index, 0)
-        index = min(index, bins - 1)
-        counts[index] += 1
+        counts[bisect.bisect_left(bin_edges, float(sample))] += 1
 
     psi_value = 0.0
-    reference_mass = 1.0 / bins
-    for count in counts:
-        observed_mass = count / n
-        if observed_mass <= 0.0:
-            continue
-        psi_value += (observed_mass - reference_mass) * math.log(
-            observed_mass / reference_mass
-        )
+    for count, expected in zip(counts, bin_shares, strict=True):
+        observed = max(count / len(samples), PSI_FLOOR)
+        expected = max(float(expected), PSI_FLOOR)
+        psi_value += (observed - expected) * math.log(observed / expected)
 
-    return float(psi_value)
+    return psi_value
 
 
 def _relative_mean_shift(reference_mean: float, samples: Sequence[float]) -> float:
@@ -86,16 +71,14 @@ def feature_drift(
     samples: Sequence[float],
 ) -> float:
     """Return the drift of one feature against the champion training profile."""
-    deciles = [float(value) for value in reference.get("deciles") or []]
     values = [float(value) for value in samples]
-    if len(deciles) < 2 or not values:
+    if not values:
         return 0.0
-
-    unique_deciles = sorted({value for value in deciles})
-    if len(unique_deciles) <= 1:
-        return float(_relative_mean_shift(float(reference.get("mean") or 0.0), values))
-
-    return float(population_stability_index(deciles, values))
+    if not reference.get("bin_edges"):  # constant feature in training
+        return _relative_mean_shift(float(reference.get("mean") or 0.0), values)
+    return population_stability_index(
+        reference["bin_edges"], reference["bin_shares"], values
+    )
 
 
 class DriftTracker:

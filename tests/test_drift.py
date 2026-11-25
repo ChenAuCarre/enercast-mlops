@@ -2,6 +2,8 @@
 
 import math
 
+import pytest
+
 from app.drift import (
     DRIFT_THRESHOLD,
     DriftTracker,
@@ -10,42 +12,59 @@ from app.drift import (
 )
 
 
-def test_population_stability_index_is_zero_for_an_identical_distribution():
-    deciles = [float(value) for value in range(0, 101, 10)]
-    samples = [float(value) for value in range(5, 100, 10)]  # one per bin
+def _reference(values):
+    import pandas as pd
 
-    assert population_stability_index(deciles, samples) == 0.0
+    from ml.train import build_training_profile
+
+    profile = build_training_profile(pd.DataFrame({"x": values}), "v1")
+    return profile["features"]["x"]
+
+
+def test_population_stability_index_is_zero_for_an_identical_distribution():
+    ref = _reference([float(value) for value in range(100)])
+    samples = [float(value) for value in range(100)]
+
+    assert feature_drift(ref, samples) == pytest.approx(0.0, abs=1e-9)
+
+
+def test_feature_drift_stays_low_for_a_feature_with_repeated_values():
+    # Like lights: ~80% zeros. Equal-mass bins used to give PSI ~1.5 here.
+    import random
+
+    rng = random.Random(0)
+    population = [
+        rng.choice([0.0] * 8 + [10.0, 20.0, 30.0, 70.0]) for _ in range(20000)
+    ]
+    ref = _reference(population)
+    samples = rng.sample(population, 500)
+
+    assert feature_drift(ref, samples) < 0.05
 
 
 def test_population_stability_index_stays_below_the_threshold_on_the_same_distribution():
     import random
 
     rng = random.Random(0)
-    population = [rng.gauss(0, 1) for _ in range(20000)]
-    ordered = sorted(population)
-    deciles = [
-        ordered[min(int(i / 10 * len(ordered)), len(ordered) - 1)] for i in range(11)
-    ]
+    ref = _reference([rng.gauss(0, 1) for _ in range(20000)])
     samples = [rng.gauss(0, 1) for _ in range(500)]
 
-    assert population_stability_index(deciles, samples) < DRIFT_THRESHOLD
+    assert feature_drift(ref, samples) < DRIFT_THRESHOLD
 
 
 def test_population_stability_index_exceeds_the_threshold_for_a_shifted_distribution():
-    deciles = [float(value) for value in range(0, 101, 10)]
-    samples = [float(value) for value in range(100, 200, 10)]
+    ref = _reference([float(value) for value in range(100)])
+    samples = [float(value) for value in range(100, 200)]
 
-    assert population_stability_index(deciles, samples) > DRIFT_THRESHOLD
+    assert feature_drift(ref, samples) > DRIFT_THRESHOLD
 
 
-def test_population_stability_index_handles_empty_inputs():
-    assert population_stability_index([0.0, 10.0], []) == 0.0
-    assert population_stability_index([], [0.0, 10.0]) == 0.0
-    assert population_stability_index([0.0], [0.0, 10.0]) == 0.0
+def test_population_stability_index_handles_empty_samples():
+    assert population_stability_index([10.0], [0.5, 0.5], []) == 0.0
 
 
 def test_feature_drift_uses_a_relative_shift_for_constant_features():
-    constant_reference = {"deciles": [7.0, 7.0, 7.0, 7.0, 7.0], "mean": 7.0}
+    constant_reference = _reference([7.0, 7.0, 7.0])
 
     assert feature_drift(constant_reference, [7.0, 7.0, 7.0]) == 0.0
     assert feature_drift(constant_reference, [9.0, 9.0, 9.0]) > DRIFT_THRESHOLD

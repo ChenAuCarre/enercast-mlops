@@ -116,7 +116,7 @@ def test_build_training_profile_summarizes_each_feature():
 
     profile = build_training_profile(X_train, "v1")
 
-    assert profile["schema_version"] == 1
+    assert profile["schema_version"] == 2
     assert profile["dataset_version"] == "v1"
     assert profile["train_rows"] == 5
     assert profile["feature_names"] == ["lights", "T1"]
@@ -129,6 +129,8 @@ def test_build_training_profile_summarizes_each_feature():
     assert lights["max"] == 30.0
     assert len(lights["deciles"]) == 11
     assert lights["deciles"] == sorted(lights["deciles"])
+    assert len(lights["bin_shares"]) == len(lights["bin_edges"]) + 1
+    assert sum(lights["bin_shares"]) == pytest.approx(1.0)
 
 
 def test_build_training_profile_handles_constant_features_and_json():
@@ -138,6 +140,7 @@ def test_build_training_profile_handles_constant_features_and_json():
 
     assert profile["features"]["lights"]["std"] == 0.0
     assert set(profile["features"]["lights"]["deciles"]) == {7.0}
+    assert profile["features"]["lights"]["bin_edges"] == []
     assert json.loads(json.dumps(profile)) == profile
 
 

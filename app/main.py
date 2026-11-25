@@ -35,6 +35,8 @@ def _load_drift_profile():
     if version is None:
         return  # nothing loaded: no champion to compare against
     profile = holder.training_profile()
+    if profile and profile.get("schema_version") != 2:
+        profile = None  # older profiles have no bin shares: PSI would be wrong
     if holder.version != version:
         return  # a refresh moved the champion meanwhile; its own load will configure
     # the artifact nests per-feature stats under "features"

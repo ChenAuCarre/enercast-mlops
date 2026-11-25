@@ -217,7 +217,10 @@ def test_predict_updates_the_feature_drift_gauge(client, monkeypatch):
     monkeypatch.setattr(
         main.holder,
         "training_profile",
-        lambda: {"features": {"lights": {"deciles": [0.0, 10.0, 20.0], "mean": 10.0}}},
+        lambda: {
+            "schema_version": 2,
+            "features": {"lights": {"bin_edges": [10.0], "bin_shares": [0.5, 0.5]}},
+        },
     )
 
     # Load synchronously: stale background threads from earlier tests race otherwise.

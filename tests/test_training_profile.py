@@ -45,10 +45,25 @@ def test_stale_profile_load_does_not_overwrite_a_newer_champion(monkeypatch):
     def slow_profile():
         # a refresh lands while the download is in flight
         main.holder.state = (object(), {"resolved_version": "3"})
-        return {"features": {"a": {"deciles": [0.0, 1.0, 2.0]}}}
+        return {"schema_version": 2, "features": {"a": {"mean": 1.0}}}
 
     monkeypatch.setattr(main.holder, "state", (object(), {"resolved_version": "2"}))
     monkeypatch.setattr(main.holder, "training_profile", slow_profile)
+
+    main._load_drift_profile()
+
+    assert not tracker.enabled
+
+
+def test_old_profile_without_bin_shares_disables_drift(monkeypatch):
+    tracker = DriftTracker()
+    monkeypatch.setattr(main, "drift_tracker", tracker)
+    monkeypatch.setattr(main.holder, "state", (object(), {"resolved_version": "2"}))
+    monkeypatch.setattr(
+        main.holder,
+        "training_profile",
+        lambda: {"schema_version": 1, "features": {"a": {"deciles": [0.0, 1.0]}}},
+    )
 
     main._load_drift_profile()
 

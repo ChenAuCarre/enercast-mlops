@@ -5,6 +5,7 @@ from pathlib import Path
 
 import mlflow
 import mlflow.sklearn
+import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
@@ -105,6 +106,13 @@ def build_training_profile(X_train, dataset_version):
     for name in X_train.columns:
         series = X_train[name].astype(float)
         deciles = series.quantile(quantiles).tolist()
+        # Bins cut at the unique interior deciles, with the real training share of
+        # each bin: repeated values (lights is mostly 0) make the bins unequal.
+        # Bin rule must match app.drift.population_stability_index (bisect_left).
+        edges = sorted(set(deciles[1:-1])) if series.min() < series.max() else []
+        shares = np.bincount(
+            np.searchsorted(edges, series, side="left"), minlength=len(edges) + 1
+        ) / len(series)
         features[name] = {
             "count": int(series.count()),
             "mean": float(series.mean()),
@@ -112,10 +120,12 @@ def build_training_profile(X_train, dataset_version):
             "min": float(series.min()),
             "max": float(series.max()),
             "deciles": [float(value) for value in deciles],
+            "bin_edges": [float(value) for value in edges],
+            "bin_shares": [float(value) for value in shares],
         }
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "dataset_version": dataset_version,
         "train_rows": len(X_train),
         "feature_names": list(X_train.columns),
