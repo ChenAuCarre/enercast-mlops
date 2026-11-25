@@ -23,6 +23,7 @@ from ml.registry import (
     MODEL_NAME,
     AliasAuditFailed,
     ChampionAliasRestoreFailed,
+    LocalRegistryWriteForbidden,
     NoChampionRegistered,
     PromotionAuthorization,
     PromotionAuthorizationError,
@@ -159,6 +160,12 @@ class FakeClient:
 
 def install_client(monkeypatch, client):
     monkeypatch.setattr("ml.registry.get_client", lambda: client)
+
+
+@pytest.fixture(autouse=True)
+def _allow_registry_writes(monkeypatch):
+    """Registry writes are CI-only; simulate GitHub Actions for unit tests."""
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
 
 
 def test_get_champion_returns_the_version_pointed_by_the_alias(monkeypatch):
@@ -733,3 +740,34 @@ def test_failed_alias_deletion_verification_raises_champion_alias_restore_failed
         )
 
     assert client.aliases[CHAMPION_ALIAS] == "2"
+
+
+def test_register_is_refused_outside_github_actions(monkeypatch):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+
+    with pytest.raises(
+        LocalRegistryWriteForbidden, match="only allowed from GitHub Actions"
+    ):
+        register_model("model-1")
+
+
+def test_promote_is_refused_outside_github_actions(monkeypatch):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+
+    with pytest.raises(
+        LocalRegistryWriteForbidden, match="only allowed from GitHub Actions"
+    ):
+        promote_model(
+            "2",
+            authorization=promotion_authorization(),
+            candidate="candidate-hist-gradient-boosting-v2",
+        )
+
+
+def test_rollback_is_refused_outside_github_actions(monkeypatch):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+
+    with pytest.raises(
+        LocalRegistryWriteForbidden, match="only allowed from GitHub Actions"
+    ):
+        rollback_champion("1", reason="incident-123")

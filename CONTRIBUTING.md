@@ -89,3 +89,4 @@ To check the image, build and smoke-test it locally as described in [`docs/DEPLO
 * **No datasets or model binaries in Git**: track data with DVC (`dvc add` → `dvc push`) and commit only the `.dvc` pointer files.
 * **Preserve chronological splits**: data preparation must keep `max(train.date) < min(eval.date)` and fit preprocessing on the training split only.
 * **Never edit the production `@champion` alias by hand**: promotions and rollbacks go through `ct-retrain.yml` or `rollback.yml` so they are logged in MLflow.
+* **Never write to the shared registry from a laptop**: `register_model`, `promote_model` and `rollback_champion` refuse to run unless `GITHUB_ACTIONS=true`. For local experiments, set `MLFLOW_TRACKING_URI=file:./mlruns`; use `ml/train.py` or a separate experiment, never the shared registry.
