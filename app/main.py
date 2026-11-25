@@ -24,6 +24,11 @@ holder = ChampionHolder()
 drift_tracker = DriftTracker()
 
 
+def _configure_drift(reference):
+    drift_tracker.configure(reference)
+    metrics.clear_feature_drift()  # no stale gauge values from the old reference
+
+
 def _load_drift_profile():
     # Network fetch that can be slow or retry: never run it on the startup path.
     version = holder.version
@@ -31,7 +36,7 @@ def _load_drift_profile():
     if holder.version != version:
         return  # a refresh moved the champion meanwhile; its own load will configure
     # the artifact nests per-feature stats under "features"
-    drift_tracker.configure((profile or {}).get("features"))
+    _configure_drift((profile or {}).get("features"))
     log.log(
         logging.INFO,
         "drift_profile_loaded" if profile else "drift_profile_missing",
@@ -200,7 +205,7 @@ def refresh(x_refresh_token: str = Header(default="")):
         raise HTTPException(502, "Refresh failed; see server logs") from exc
 
     metrics.set_model_info(holder.version, loaded=True)
-    drift_tracker.configure(None)  # old reference no longer matches the new model
+    _configure_drift(None)  # old reference no longer matches the new model
     _load_drift_profile_async()
 
     log.log(

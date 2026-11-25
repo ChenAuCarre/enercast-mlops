@@ -286,3 +286,15 @@ def test_client_errors_are_logged_as_warnings_not_errors(client, monkeypatch):
 
     level, _, _ = next(e for e in events if e[1] == "http_request")
     assert level == main.logging.WARNING
+
+
+def test_refresh_clears_the_stale_feature_drift_gauge(client, monkeypatch):
+    monkeypatch.setattr(config, "REFRESH_API_TOKEN", "tok")
+    metrics_mod = main.metrics
+    metrics_mod.set_feature_drift("lights", 1.5)
+
+    with client() as c:
+        r = c.post("/refresh", headers={"X-Refresh-Token": "tok"})
+
+    assert r.status_code == 200
+    assert REGISTRY.get_sample_value("feature_drift", {"feature": "lights"}) is None

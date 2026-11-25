@@ -71,6 +71,11 @@ def set_feature_drift(feature: str, value: float) -> None:
     feature_drift.labels(feature=feature).set(float(value))
 
 
+def clear_feature_drift() -> None:
+    """Drop all feature drift series (the reference they were computed on is gone)."""
+    feature_drift.clear()
+
+
 def render_metrics() -> bytes:
     """Return the Prometheus exposition payload."""
     return generate_latest()
