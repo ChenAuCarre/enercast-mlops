@@ -230,3 +230,17 @@ def test_predict_updates_the_feature_drift_gauge(client, monkeypatch):
     value = REGISTRY.get_sample_value("feature_drift", {"feature": "lights"})
     assert value is not None
     assert math.isfinite(value)
+
+
+def test_unhandled_exception_is_counted_as_a_500(client, monkeypatch):
+    def boom(_df):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(main, "preprocess_features", boom)
+    labels = {"method": "POST", "path": "/predict", "status": "500"}
+    before = REGISTRY.get_sample_value("http_requests_total", labels) or 0
+
+    with client() as c, pytest.raises(RuntimeError):
+        c.post("/predict", json=PAYLOAD)
+
+    assert REGISTRY.get_sample_value("http_requests_total", labels) == before + 1

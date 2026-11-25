@@ -77,22 +77,23 @@ async def request_logging(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
     token = app_logging.set_request_id(request_id)
     start = time.perf_counter()
+    status = 500  # stays 500 if call_next raises, so crashes are still counted
     try:
         response = await call_next(request)
-        duration_seconds = time.perf_counter() - start
-        duration_ms = round(duration_seconds * 1000, 3)
         status = response.status_code
         response.headers["X-Request-ID"] = request_id
-        level = logging.ERROR if status >= 400 else logging.INFO
+        return response
+    finally:
+        duration_seconds = time.perf_counter() - start
         log.log(
-            level,
+            logging.ERROR if status >= 400 else logging.INFO,
             "http_request",
             extra={
                 "request_id": request_id,
                 "method": request.method,
                 "path": request.url.path,
                 "status": status,
-                "duration_ms": duration_ms,
+                "duration_ms": round(duration_seconds * 1000, 3),
             },
         )
         metrics.observe_http_request(
@@ -101,8 +102,6 @@ async def request_logging(request: Request, call_next):
             status=status,
             duration_seconds=duration_seconds,
         )
-        return response
-    finally:
         app_logging.reset_request_id(token)
 
 
