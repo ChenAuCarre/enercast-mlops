@@ -91,6 +91,38 @@ def evaluate_model(model, X_eval, y_eval):
     return predictions, metrics
 
 
+def build_training_profile(X_train, dataset_version):
+    """Summarize the training features for production drift monitoring.
+
+    The API downloads this artifact from the champion's run and compares the
+    distribution of live predictions with it. Deciles are stored so the API
+    can compute a population stability index (PSI) without access to the
+    training data, which is never shipped in the container.
+    """
+    quantiles = [i / 10 for i in range(11)]
+    features = {}
+
+    for name in X_train.columns:
+        series = X_train[name].astype(float)
+        deciles = series.quantile(quantiles).tolist()
+        features[name] = {
+            "count": int(series.count()),
+            "mean": float(series.mean()),
+            "std": float(series.std(ddof=0)),
+            "min": float(series.min()),
+            "max": float(series.max()),
+            "deciles": [float(value) for value in deciles],
+        }
+
+    return {
+        "schema_version": 1,
+        "dataset_version": dataset_version,
+        "train_rows": len(X_train),
+        "feature_names": list(X_train.columns),
+        "features": features,
+    }
+
+
 def run_experiment(run_name, config, data):
     """Train a model and log the experiment to MLflow.
 
@@ -186,8 +218,18 @@ def run_experiment(run_name, config, data):
                 }
             ).to_csv(validation_predictions_path, index=False)
 
+            profile_path = temp_path / "training-profile.json"
+            profile_path.write_text(
+                json.dumps(
+                    build_training_profile(data["X_train"], dataset_version),
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
             mlflow.log_artifact(str(metrics_path))
             mlflow.log_artifact(str(validation_predictions_path))
+            mlflow.log_artifact(str(profile_path))
 
         print(f"\n--- {run_name} ---")
         print(f"Run ID: {run.info.run_id}")

@@ -1,27 +1,55 @@
 import logging
+import math
 import secrets
+import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pandas as pd
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
+from prometheus_client import CONTENT_TYPE_LATEST
 
-from app import config
+from app import config, metrics
+from app import logging as app_logging
+from app.drift import DriftTracker
 from app.model import ChampionHolder
 from app.schemas import PredictRequest, PredictResponse, RefreshResponse
 from ml.preprocess import preprocess_features
 
-log = logging.getLogger("app")
+log = app_logging.get_logger("app")
 holder = ChampionHolder()
+drift_tracker = DriftTracker()
 
 
 @asynccontextmanager
 async def lifespan(_):
+    app_logging.configure_logging()
     try:
         holder.load()
     except Exception:  # start anyway; /health reports 503 until a refresh works
         log.exception("Champion model failed to load at startup")
+
+    drift_tracker.configure(holder.training_profile())
+
+    if drift_tracker.enabled and holder.version is not None:
+        log.log(
+            logging.INFO,
+            "model_loaded",
+            extra={
+                "model_version": str(holder.version),
+                "model_name": holder.info["model_name"],
+                "dataset_version": holder.info.get("dataset_version"),
+            },
+        )
+    else:
+        log.log(
+            logging.INFO,
+            "model_loaded_without_training_profile",
+            extra={"model_version": str(holder.version) if holder.version else None},
+        )
+
     yield
 
 
@@ -29,6 +57,40 @@ app = FastAPI(title="enercast-mlops", lifespan=lifespan)
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+@app.middleware("http")
+async def request_logging(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
+    token = app_logging.set_request_id(request_id)
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+        duration_seconds = time.perf_counter() - start
+        duration_ms = round(duration_seconds * 1000, 3)
+        status = response.status_code
+        response.headers["X-Request-ID"] = request_id
+        level = logging.ERROR if status >= 400 else logging.INFO
+        log.log(
+            level,
+            "http_request",
+            extra={
+                "request_id": request_id,
+                "method": request.method,
+                "path": request.url.path,
+                "status": status,
+                "duration_ms": duration_ms,
+            },
+        )
+        metrics.observe_http_request(
+            method=request.method,
+            path=request.url.path,
+            status=status,
+            duration_seconds=duration_seconds,
+        )
+        return response
+    finally:
+        app_logging.reset_request_id(token)
 
 
 @app.get("/", include_in_schema=False)
@@ -57,14 +119,43 @@ def model_info():
     return holder.info
 
 
+@app.get("/metrics")
+def metrics_endpoint():
+    return Response(
+        content=metrics.render_metrics(),
+        media_type=CONTENT_TYPE_LATEST,
+    )
+
+
 @app.post("/predict", response_model=PredictResponse)
 def predict(req: PredictRequest):
     state = holder.state  # one read: model and info stay consistent across a refresh
     if state is None:
         raise HTTPException(503, "Champion model not loaded")
     model, info = state
+    start = time.perf_counter()
     X = preprocess_features(pd.DataFrame([req.model_dump()]))
     y = float(model.predict(X)[0])
+    latency_ms = round((time.perf_counter() - start) * 1000, 3)
+
+    metrics.observe_prediction(str(info["resolved_version"]), y)
+    drift_tracker.observe({name: float(X.iloc[0][name]) for name in X.columns})
+    for name, value in drift_tracker.current().items():
+        metrics.set_feature_drift(name, value)
+
+    log.log(
+        logging.INFO,
+        "prediction_made",
+        extra={
+            "request_id": app_logging.get_request_id(),
+            "model_version": str(info["resolved_version"]),
+            "prediction": round(y, 2),
+            "latency_ms": latency_ms,
+            "feature_count": int(X.shape[1]),
+            "missing_count": _missing_count(req.model_dump()),
+        },
+    )
+
     return PredictResponse(
         predicted_appliances_wh=round(y, 2),
         model_name=info["model_name"],
@@ -86,6 +177,32 @@ def refresh(x_refresh_token: str = Header(default="")):
     except Exception as exc:
         log.exception("Refresh failed; keeping previous model")
         raise HTTPException(502, "Refresh failed; see server logs") from exc
+
+    drift_tracker.configure(holder.training_profile())
+
+    log.log(
+        logging.INFO,
+        "model_refreshed",
+        extra={
+            "request_id": app_logging.get_request_id(),
+            "from_version": str(previous) if previous is not None else None,
+            "to_version": str(holder.version) if holder.version is not None else None,
+        },
+    )
+
     return RefreshResponse(
         status="refreshed", previous_version=previous, current_version=holder.version
     )
+
+
+def _missing_count(payload: dict) -> int:
+    """Count missing values (None or non-finite numbers) in a prediction payload."""
+    missing = 0
+    for value in payload.values():
+        if (
+            value is None
+            or isinstance(value, float)
+            and (math.isnan(value) or math.isinf(value))
+        ):
+            missing += 1
+    return missing

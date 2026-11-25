@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 
 import mlflow
@@ -11,6 +12,7 @@ class ChampionHolder:
     def __init__(self):
         # (model, info) swapped as one tuple so readers never see a mismatched pair.
         self.state = None
+        self._training_profiles: dict[str, dict | None] = {}
 
     @property
     def model(self):
@@ -37,3 +39,35 @@ class ChampionHolder:
             "loaded_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         }
         self.state = (model, info)
+
+    def training_profile(self) -> dict | None:
+        """Return the training profile of the loaded champion version.
+
+        The profile is the ``training-profile.json`` artifact logged by the
+        training run that produced the champion version. When it is missing (for
+        example an older champion trained before the artifact existed) the
+        drift monitoring stays disabled instead of failing the service.
+        """
+        version = self.version
+        if version is None:
+            return None
+
+        key = str(version)
+        if key not in self._training_profiles:
+            self._training_profiles[key] = self._load_training_profile()
+
+        return self._training_profiles[key]
+
+    def _load_training_profile(self) -> dict | None:
+        try:
+            mv = registry.get_champion()
+            artifact_path = mlflow.artifacts.download_artifacts(
+                run_id=mv.run_id,
+                artifact_path="training-profile.json",
+            )
+            with open(artifact_path, "r", encoding="utf-8") as handle:
+                profile = json.load(handle)
+            self._training_profiles[str(mv.version)] = profile
+            return profile
+        except Exception:  # noqa: BLE001 - drift is optional, never fatal
+            return None

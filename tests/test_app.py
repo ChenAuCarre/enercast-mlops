@@ -1,7 +1,9 @@
+import math
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from prometheus_client import REGISTRY
 
 from app import config, main, model
 
@@ -133,3 +135,63 @@ def test_refresh_non_ascii_token_is_401(client, monkeypatch):
     with client() as c:
         r = c.post("/refresh", headers={"X-Refresh-Token": "é".encode("latin-1")})
     assert r.status_code == 401
+
+
+def test_metrics_endpoint_returns_the_prometheus_payload(client):
+    with client() as c:
+        r = c.get("/metrics")
+    assert r.status_code == 200
+    assert "text/plain" in r.headers["content-type"]
+    assert b"http_requests_total" in r.content
+    assert b"predictions_total" in r.content
+
+
+def test_predict_echoes_a_request_id_and_generates_one(client):
+    with client() as c:
+        echoed = c.post("/predict", json=PAYLOAD, headers={"X-Request-ID": "rid-1"})
+        generated = c.post("/predict", json=PAYLOAD)
+    assert echoed.status_code == 200
+    assert echoed.headers["X-Request-ID"] == "rid-1"
+    assert generated.headers["X-Request-ID"]
+
+
+def test_predict_logs_structured_prediction_and_request_events(client, monkeypatch):
+    events = []
+
+    class RecordingLog:
+        def log(self, level, event, extra=None, **kwargs):
+            events.append((level, event, extra))
+
+    monkeypatch.setattr(main, "log", RecordingLog())
+
+    with client() as c:
+        r = c.post("/predict", json=PAYLOAD)
+    assert r.status_code == 200
+
+    event_names = [event for _level, event, _extra in events]
+    assert "http_request" in event_names
+    assert "prediction_made" in event_names
+
+    _level, _event, extra = next(e for e in events if e[1] == "prediction_made")
+    assert extra["model_version"] == "2"
+    assert "prediction" in extra
+    assert "latency_ms" in extra
+    assert "feature_count" in extra
+    assert "missing_count" in extra
+    assert extra["feature_count"] == 27
+
+
+def test_predict_updates_the_feature_drift_gauge(client, monkeypatch):
+    monkeypatch.setattr(
+        main.holder,
+        "training_profile",
+        lambda: {"lights": {"deciles": [0.0, 10.0, 20.0], "mean": 10.0}},
+    )
+
+    with client() as c:
+        for _ in range(100):
+            assert c.post("/predict", json=PAYLOAD).status_code == 200
+
+    value = REGISTRY.get_sample_value("feature_drift", {"feature": "lights"})
+    assert value is not None
+    assert math.isfinite(value)

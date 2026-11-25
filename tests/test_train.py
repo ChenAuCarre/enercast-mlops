@@ -4,6 +4,7 @@ The sklearn estimators are mutable: each run must get a dedicated instance,
 provided by :func:`build_estimator`.
 """
 
+import json
 import subprocess
 from types import SimpleNamespace
 
@@ -12,6 +13,7 @@ import pytest
 
 from ml.train import (
     build_estimator,
+    build_training_profile,
     get_git_commit,
     is_git_dirty,
     run_experiment,
@@ -104,6 +106,41 @@ def test_build_estimator_rejects_unknown_type():
         build_estimator("RandomForestRegressor")
 
 
+def test_build_training_profile_summarizes_each_feature():
+    X_train = pd.DataFrame(
+        {
+            "lights": [0.0, 0.0, 10.0, 20.0, 30.0],
+            "T1": [10.0, 12.0, 14.0, 16.0, 18.0],
+        }
+    )
+
+    profile = build_training_profile(X_train, "v1")
+
+    assert profile["schema_version"] == 1
+    assert profile["dataset_version"] == "v1"
+    assert profile["train_rows"] == 5
+    assert profile["feature_names"] == ["lights", "T1"]
+    assert set(profile["features"]) == {"lights", "T1"}
+
+    lights = profile["features"]["lights"]
+    assert lights["count"] == 5
+    assert lights["mean"] == 12.0
+    assert lights["min"] == 0.0
+    assert lights["max"] == 30.0
+    assert len(lights["deciles"]) == 11
+    assert lights["deciles"] == sorted(lights["deciles"])
+
+
+def test_build_training_profile_handles_constant_features_and_json():
+    X_train = pd.DataFrame({"lights": [7.0, 7.0, 7.0]})
+
+    profile = build_training_profile(X_train, "v2")
+
+    assert profile["features"]["lights"]["std"] == 0.0
+    assert set(profile["features"]["lights"]["deciles"]) == {7.0}
+    assert json.loads(json.dumps(profile)) == profile
+
+
 def test_run_experiment_instantiates_a_fresh_estimator_per_run(monkeypatch):
     fake_mlflow = FakeMlflow()
     monkeypatch.setattr("ml.train.mlflow", fake_mlflow)
@@ -137,6 +174,7 @@ def test_run_experiment_instantiates_a_fresh_estimator_per_run(monkeypatch):
     assert fake_mlflow.tags["git_commit"] == "abc123"
     assert fake_mlflow.tags["git_dirty"] == "true"
     assert fake_mlflow.params["git_dirty"] == "true"
+    assert any(path.endswith("training-profile.json") for path in fake_mlflow.artifacts)
 
 
 def test_get_git_commit_falls_back_to_unknown(monkeypatch):
