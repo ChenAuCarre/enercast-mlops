@@ -17,7 +17,8 @@ The deployed API exposes three monitoring concerns:
 
 The champion training profile (`training-profile.json`) is logged by the
 training run (`ml.train`) from the training features; the API downloads it from
-the MLflow run of the loaded champion version when it resolves the model.
+the MLflow run of the champion version on its first prediction (and again after
+a `/refresh`).
 
 ## Structured logs
 
@@ -25,11 +26,11 @@ the MLflow run of the loaded champion version when it resolves the model.
 - Every line is one JSON object, for example:
 
 ```json
-{"timestamp":"2026-11-25T13:11:16.722+00:00","level":"info","event":"prediction_made","logger":"app","request_id":"5c9be2c025fc","model_version":"2","prediction":114.62,"latency_ms":4.167,"feature_count":27,"missing_count":0}
+{"timestamp":"2026-11-25T13:11:16.722+00:00","level":"info","event":"prediction_made","logger":"app","request_id":"5c9be2c025fc","model_version":"2","prediction":114.62,"latency_ms":4.167,"feature_count":27}
 ```
 
 - Request lifecycle events: `http_request` (method, path, status, duration_ms) and
-  `prediction_made` (model_version, prediction, latency_ms, feature_count, missing_count).
+  `prediction_made` (model_version, prediction, latency_ms, feature_count).
 - Model lifecycle events: `model_loaded`, `champion_model_load_failed`,
   `drift_profile_loaded`, `drift_profile_missing`, `model_refreshed`.
 - 5xx responses are logged with level `error`, 4xx with `warning`.
@@ -62,8 +63,9 @@ The API serves its metrics at `GET /metrics` through `prometheus_client`.
 - Live distribution: last 500 predictions per feature (`DRIFT_WINDOW_SIZE`).
 - Recomputed every 100 predictions (`DRIFT_WINDOW_RESET_EVERY`).
 - Threshold: `DRIFT_THRESHOLD = 0.20` (PSI).
+- `day_of_week` is not tracked: a 3.5-day window never holds all 7 weekdays.
 - When the champion has no training profile, drift monitoring is disabled and a
-  `drift_profile_missing` event is logged; the service keeps
+  `drift_profile_missing` warning is logged; the service keeps
   serving.
 
 ## Stack
@@ -111,7 +113,7 @@ The Grafana alerting rules provisioned in `monitoring/grafana-alerting.yml`:
    over 2 minutes.
 3. Data drift: a feature drifted above 0.20 PSI for 2 minutes.
 
-The no-data state is set to `Normal` for the error-rate and drift rules so that
+The no-data state is set to `OK` (shown as Normal) for the error-rate and drift rules so that
 restarts of the API do not fire false alerts.
 
 ## Dashboard

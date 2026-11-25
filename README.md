@@ -51,6 +51,7 @@ curl https://enercast-mlops-tree.onrender.com/model-info
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Local setup, branch flow and protection, commits, PRs, local checks |
 | [`docs/API.md`](docs/API.md) | HTTP contract: endpoints, schemas, validation, errors, examples |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Configuration, workflows and their triggers, deploying, recovery |
+| [`docs/MONITORING.md`](docs/MONITORING.md) | Logs, metrics, drift, Prometheus/Grafana stack, alerts, traffic replay |
 | [`ml/README_data.md`](ml/README_data.md) | Dataset source, license, versions, splits, DVC hashes, data contract |
 | [`ml/README_experiments.md`](ml/README_experiments.md) | Metric, quality gates, MLflow runs, promotion evidence, CT and rollback logic |
 
@@ -63,12 +64,14 @@ enercast-mlops/
 ├── .github/workflows/       # CI/CD, continuous training, rollback
 ├── app/                     # Inference API and web UI
 ├── data/                    # DVC-tracked datasets
-├── docs/                    # API and deployment docs
+├── docs/                    # API, deployment and monitoring docs
 ├── ml/                      # Training, promotion policy, model registry
+├── monitoring/              # Prometheus and Grafana config, dashboard, alerts
 ├── notebooks/               # Exploratory analysis
-├── scripts/                 # Scripts used by GitHub Actions
+├── scripts/                 # CI smoke test, traffic replay
 ├── tests/                   # Pytest suite
 ├── Dockerfile               # Production image
+├── docker-compose.yml       # Local API + Prometheus + Grafana
 ├── pyproject.toml           # Dependencies
 └── CONTRIBUTING.md
 ```

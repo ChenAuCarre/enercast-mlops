@@ -27,6 +27,9 @@ Configuration is read from environment variables at start-up (`.env` is passed w
 | `REFRESH_API_TOKEN` | Token for `POST /refresh` (the endpoint is disabled when unset) |
 | `PORT` | Listen port, default `8000` (hosting platforms inject it) |
 
+To run the API with Prometheus and Grafana (`docker compose up`), see
+[MONITORING.md](MONITORING.md); its extra variables are in `.env.example`.
+
 ## Workflows and the branches that trigger them
 
 | Workflow / job | Trigger | Branch | What it does |
