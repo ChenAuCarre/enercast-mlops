@@ -13,12 +13,12 @@ from prometheus_client import CONTENT_TYPE_LATEST
 
 from app import config, metrics
 from app import logging as app_logging
-from app.drift import DRIFT_THRESHOLD, DriftTracker
+from app.drift import DRIFT_THRESHOLD, TRAINING_PROFILE_SCHEMA, DriftTracker
 from app.model import ChampionHolder
 from app.schemas import PredictRequest, PredictResponse, RefreshResponse
 from ml.preprocess import preprocess_features
 
-log = app_logging.get_logger("app")
+log = logging.getLogger("app")
 holder = ChampionHolder()
 drift_tracker = DriftTracker()
 
@@ -42,7 +42,7 @@ def _load_drift_reference():
     # leaves drift off until the next /refresh.
     version = holder.version
     profile = holder.training_profile()
-    if profile and profile.get("schema_version") != 2:
+    if profile and profile.get("schema_version") != TRAINING_PROFILE_SCHEMA:
         profile = None  # older profiles have no bin shares: PSI would be wrong
     # the artifact nests per-feature stats under "features"
     features = (profile or {}).get("features") or {}
@@ -93,7 +93,7 @@ async def lifespan(_):
         log.log(
             logging.INFO,
             "model_loaded",
-            extra={"model_version": str(holder.version)},
+            extra={"model_version": holder.version},
         )
     except Exception:  # start anyway; /health reports 503 until a refresh works
         # Surface the failure through a structured event so that the container
@@ -102,7 +102,7 @@ async def lifespan(_):
         log.log(
             logging.ERROR,
             "champion_model_load_failed",
-            extra={"model_version": str(holder.version) if holder.version else None},
+            extra={"model_version": holder.version},
             exc_info=True,
         )
 
@@ -121,7 +121,7 @@ async def request_logging(request: Request, call_next):
     request_id = (request.headers.get("X-Request-ID") or "")[:64] or uuid.uuid4().hex[
         :12
     ]
-    token = app_logging.set_request_id(request_id)
+    token = app_logging.request_id_var.set(request_id)
     start = time.perf_counter()
     status = 500  # stays 500 if call_next raises, so crashes are still counted
     try:
@@ -153,7 +153,7 @@ async def request_logging(request: Request, call_next):
             status=status,
             duration_seconds=duration_seconds,
         )
-        app_logging.reset_request_id(token)
+        app_logging.request_id_var.reset(token)
 
 
 @app.get("/", include_in_schema=False)
@@ -248,8 +248,8 @@ def refresh(x_refresh_token: str = Header(default="")):
         logging.INFO,
         "model_refreshed",
         extra={
-            "from_version": str(previous) if previous is not None else None,
-            "to_version": str(holder.version) if holder.version is not None else None,
+            "from_version": previous,
+            "to_version": holder.version,
         },
     )
 

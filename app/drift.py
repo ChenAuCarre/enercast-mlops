@@ -24,6 +24,8 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 DRIFT_THRESHOLD = 0.20
+# Version of the training-profile.json format written by ml.train.
+TRAINING_PROFILE_SCHEMA = 2
 # shortcut: 500 time-ordered readings (10 min apart) cover ~3.5 days, compared
 # against months of training data, so seasonal weather reads as drift; compare
 # against a same-season reference window if that becomes a real alert source.

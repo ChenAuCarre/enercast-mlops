@@ -11,6 +11,8 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
+from app.drift import TRAINING_PROFILE_SCHEMA
+
 EXPERIMENT_NAME = "WattWise-energy-forecasting-final"
 
 # Version used by the fallback entry point `python -m ml.train`.
@@ -96,8 +98,8 @@ def build_training_profile(X_train, dataset_version):
     """Summarize the training features for production drift monitoring.
 
     The API downloads this artifact from the champion's run and compares the
-    distribution of live predictions with it. Deciles are stored so the API
-    can compute a population stability index (PSI) without access to the
+    distribution of live predictions with it. Bin edges and training shares
+    are stored so the API can compute a population stability index (PSI) without access to the
     training data, which is never shipped in the container.
     """
     quantiles = [i / 10 for i in range(11)]
@@ -114,21 +116,14 @@ def build_training_profile(X_train, dataset_version):
             np.searchsorted(edges, series, side="left"), minlength=len(edges) + 1
         ) / len(series)
         features[name] = {
-            "count": int(series.count()),
-            "mean": float(series.mean()),
-            "std": float(series.std(ddof=0)),
-            "min": float(series.min()),
-            "max": float(series.max()),
-            "deciles": [float(value) for value in deciles],
+            "mean": float(series.mean()),  # drift of constant features
             "bin_edges": [float(value) for value in edges],
             "bin_shares": [float(value) for value in shares],
         }
 
     return {
-        "schema_version": 2,
+        "schema_version": TRAINING_PROFILE_SCHEMA,
         "dataset_version": dataset_version,
-        "train_rows": len(X_train),
-        "feature_names": list(X_train.columns),
         "features": features,
     }
 

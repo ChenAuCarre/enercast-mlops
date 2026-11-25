@@ -118,17 +118,12 @@ def test_build_training_profile_summarizes_each_feature():
 
     assert profile["schema_version"] == 2
     assert profile["dataset_version"] == "v1"
-    assert profile["train_rows"] == 5
-    assert profile["feature_names"] == ["lights", "T1"]
     assert set(profile["features"]) == {"lights", "T1"}
 
     lights = profile["features"]["lights"]
-    assert lights["count"] == 5
+    assert set(lights) == {"mean", "bin_edges", "bin_shares"}
     assert lights["mean"] == 12.0
-    assert lights["min"] == 0.0
-    assert lights["max"] == 30.0
-    assert len(lights["deciles"]) == 11
-    assert lights["deciles"] == sorted(lights["deciles"])
+    assert lights["bin_edges"] == sorted(lights["bin_edges"])
     assert len(lights["bin_shares"]) == len(lights["bin_edges"]) + 1
     assert sum(lights["bin_shares"]) == pytest.approx(1.0)
 
@@ -138,8 +133,6 @@ def test_build_training_profile_handles_constant_features_and_json():
 
     profile = build_training_profile(X_train, "v2")
 
-    assert profile["features"]["lights"]["std"] == 0.0
-    assert set(profile["features"]["lights"]["deciles"]) == {7.0}
     assert profile["features"]["lights"]["bin_edges"] == []
     assert json.loads(json.dumps(profile)) == profile
 

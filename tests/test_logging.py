@@ -70,14 +70,14 @@ def test_json_formatter_formats_message_args():
 
 
 def test_json_formatter_attaches_the_context_request_id():
-    token = app_logging.set_request_id("rid-9")
+    token = app_logging.request_id_var.set("rid-9")
     try:
         with_context = json.loads(app_logging.JsonFormatter().format(_record()))
         explicit = json.loads(
             app_logging.JsonFormatter().format(_record(request_id="other"))
         )
     finally:
-        app_logging.reset_request_id(token)
+        app_logging.request_id_var.reset(token)
 
     assert with_context["request_id"] == "rid-9"
     assert explicit["request_id"] == "other"

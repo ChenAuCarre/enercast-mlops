@@ -28,22 +28,8 @@ _RESERVED_LOG_RECORD_KEYS = frozenset(vars(logging.makeLogRecord({}))) | {
     "color_message",  # uvicorn's ANSI-coloured duplicate of the message
 }
 
-_request_id_context: ContextVar[str] = ContextVar("app_request_id", default="")
-
-
-def set_request_id(request_id: str) -> Any:
-    """Bind a request id to the current context (middleware responsibility)."""
-    return _request_id_context.set(request_id)
-
-
-def reset_request_id(token: Any) -> None:
-    """Undo a :func:`set_request_id` call."""
-    _request_id_context.reset(token)
-
-
-def get_request_id() -> str:
-    """Return the request id bound to the current context ("" when unbound)."""
-    return _request_id_context.get()
+# Bound by the request middleware; attached to every log line of the request.
+request_id_var: ContextVar[str] = ContextVar("app_request_id", default="")
 
 
 class JsonFormatter(logging.Formatter):
@@ -65,7 +51,7 @@ class JsonFormatter(logging.Formatter):
             payload[key] = value
 
         # Context-bound id, unless the call site passed request_id explicitly.
-        if "request_id" not in payload and (request_id := get_request_id()):
+        if "request_id" not in payload and (request_id := request_id_var.get()):
             payload["request_id"] = request_id
 
         if record.exc_info:
@@ -91,8 +77,3 @@ def configure_logging() -> None:
         logger.handlers.clear()
         logger.propagate = True
     logging.getLogger("app").setLevel(getattr(logging, config.LOG_LEVEL, logging.INFO))
-
-
-def get_logger(name: str = "app") -> logging.Logger:
-    """Return a logger that emits structured JSON lines."""
-    return logging.getLogger(name)
