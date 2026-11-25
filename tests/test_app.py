@@ -298,3 +298,15 @@ def test_refresh_clears_the_stale_feature_drift_gauge(client, monkeypatch):
 
     assert r.status_code == 200
     assert REGISTRY.get_sample_value("feature_drift", {"feature": "lights"}) is None
+
+
+def test_predict_survives_a_monitoring_failure(client, monkeypatch):
+    def boom(*_):
+        raise RuntimeError("metrics broke")
+
+    monkeypatch.setattr(main.metrics, "observe_prediction", boom)
+
+    with client() as c:
+        r = c.post("/predict", json=PAYLOAD)
+
+    assert r.status_code == 200

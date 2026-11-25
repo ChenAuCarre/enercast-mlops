@@ -166,10 +166,13 @@ def predict(req: PredictRequest):
     y = float(model.predict(X)[0])
     latency_ms = round((time.perf_counter() - start) * 1000, 3)
 
-    metrics.observe_prediction(str(info["resolved_version"]), y)
-    drift_tracker.observe({name: float(X.iloc[0][name]) for name in X.columns})
-    for name, value in drift_tracker.current().items():
-        metrics.set_feature_drift(name, value)
+    try:  # monitoring must never fail a prediction
+        metrics.observe_prediction(str(info["resolved_version"]), y)
+        drift_tracker.observe({name: float(X.iloc[0][name]) for name in X.columns})
+        for name, value in drift_tracker.current().items():
+            metrics.set_feature_drift(name, value)
+    except Exception:
+        log.exception("monitoring_update_failed")
 
     log.log(
         logging.INFO,
