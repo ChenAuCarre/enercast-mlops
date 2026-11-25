@@ -1,4 +1,5 @@
 import math
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -219,6 +220,9 @@ def test_predict_updates_the_feature_drift_gauge(client, monkeypatch):
     )
 
     with client() as c:
+        deadline = time.time() + 5
+        while not main.drift_tracker.enabled and time.time() < deadline:
+            time.sleep(0.01)  # profile loads in a background thread
         for _ in range(100):
             assert c.post("/predict", json=PAYLOAD).status_code == 200
 

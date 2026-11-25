@@ -1,6 +1,7 @@
 import logging
 import math
 import secrets
+import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -23,6 +24,21 @@ holder = ChampionHolder()
 drift_tracker = DriftTracker()
 
 
+def _load_drift_profile():
+    # Network fetch that can be slow or retry: never run it on the startup path.
+    profile = holder.training_profile()
+    drift_tracker.configure(profile)
+    log.log(
+        logging.INFO,
+        "drift_profile_loaded" if profile else "drift_profile_missing",
+        extra={"model_version": str(holder.version) if holder.version else None},
+    )
+
+
+def _load_drift_profile_async():
+    threading.Thread(target=_load_drift_profile, daemon=True).start()
+
+
 @asynccontextmanager
 async def lifespan(_):
     app_logging.configure_logging()
@@ -39,24 +55,12 @@ async def lifespan(_):
             exc_info=True,
         )
 
-    drift_tracker.configure(holder.training_profile())
-
-    if drift_tracker.enabled and holder.version is not None:
-        log.log(
-            logging.INFO,
-            "model_loaded",
-            extra={
-                "model_version": str(holder.version),
-                "model_name": holder.info["model_name"],
-                "dataset_version": holder.info.get("dataset_version"),
-            },
-        )
-    else:
-        log.log(
-            logging.INFO,
-            "model_loaded_without_training_profile",
-            extra={"model_version": str(holder.version) if holder.version else None},
-        )
+    log.log(
+        logging.INFO,
+        "model_loaded",
+        extra={"model_version": str(holder.version) if holder.version else None},
+    )
+    _load_drift_profile_async()
 
     yield
 
@@ -186,7 +190,8 @@ def refresh(x_refresh_token: str = Header(default="")):
         log.exception("Refresh failed; keeping previous model")
         raise HTTPException(502, "Refresh failed; see server logs") from exc
 
-    drift_tracker.configure(holder.training_profile())
+    drift_tracker.configure(None)  # old reference no longer matches the new model
+    _load_drift_profile_async()
 
     log.log(
         logging.INFO,
