@@ -146,7 +146,6 @@ class FakeClient:
 
         self.aliases.pop(alias, None)
 
-
     def set_model_version_tag(self, name, version, key, value):
         self.calls.append(("tag-set", name, version, key, value))
 
