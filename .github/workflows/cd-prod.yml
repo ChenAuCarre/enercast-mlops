@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: production
-      url: ${{ vars.RENDER_SERVICE_URL }}
+      url: ${{ vars.API_BASE_URL }}
     permissions:
       contents: read
       packages: read
@@ -88,4 +88,4 @@ jobs:
       - name: Live smoke test
         env:
           SMOKE_TIMEOUT: "300"
-        run: scripts/smoke_test.sh "${{ vars.RENDER_SERVICE_URL }}" "${{ steps.champion.outputs.version }}"
+        run: scripts/smoke_test.sh "${{ vars.API_BASE_URL }}" "${{ steps.champion.outputs.version }}"

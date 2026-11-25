@@ -62,7 +62,7 @@ jobs:
         env:
           TARGET_VERSION: ${{ inputs['target-version'] }}
           REASON: ${{ inputs['reason'] }}
-          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
           REFRESH_API_TOKEN: ${{ secrets.REFRESH_API_TOKEN }}
         run: |
           set -euo pipefail
@@ -81,15 +81,15 @@ jobs:
             exit 1
           fi
           if [ -z "${API_BASE_URL}" ] || [ -z "${REFRESH_API_TOKEN}" ]; then
-            echo "::error::API_BASE_URL and REFRESH_API_TOKEN secrets are required to refresh and verify the live inference service during rollback."
+            echo "::error::The API_BASE_URL variable and the REFRESH_API_TOKEN secret are required to refresh and verify the live inference service during rollback."
             exit 1
           fi
 
       - name: Resolve current champion version before rollback
         id: champion_before
         env:
-          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-          MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+          MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_USERNAME: ${{ vars.MLFLOW_TRACKING_USERNAME }}
           MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
         run: |
           set -euo pipefail
@@ -121,8 +121,8 @@ jobs:
         env:
           TARGET_VERSION: ${{ inputs['target-version'] }}
           REASON: ${{ inputs['reason'] }}
-          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-          MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+          MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_USERNAME: ${{ vars.MLFLOW_TRACKING_USERNAME }}
           MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
         run: |
           set -euo pipefail
@@ -145,8 +145,8 @@ jobs:
         id: champion_after
         env:
           TARGET_VERSION: ${{ inputs['target-version'] }}
-          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-          MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+          MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_USERNAME: ${{ vars.MLFLOW_TRACKING_USERNAME }}
           MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
         run: |
           set -euo pipefail
@@ -184,7 +184,7 @@ jobs:
       - name: Refresh champion in the inference service
         id: refresh
         env:
-          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
           REFRESH_API_TOKEN: ${{ secrets.REFRESH_API_TOKEN }}
           EXPECTED_VERSION: ${{ steps.champion_after.outputs.version }}
         run: |
@@ -209,7 +209,7 @@ jobs:
       - name: Verify restored champion version
         id: verify
         env:
-          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
           EXPECTED_VERSION: ${{ steps.champion_after.outputs.version }}
           HEALTH_MAX_ATTEMPTS: "10"
           HEALTH_RETRY_DELAY_SECONDS: "15"
@@ -264,7 +264,7 @@ jobs:
       - name: Live prediction smoke test
         id: smoke_test
         env:
-          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
           EXPECTED_VERSION: ${{ steps.champion_after.outputs.version }}
         run: |
           set -euo pipefail
