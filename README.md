@@ -10,26 +10,29 @@
 
 ```mermaid
 flowchart TB
+    Repo["GitHub repo<br/>code + DVC pointers"]
     DVC[("DagsHub Storage<br/>DVC remote")]
-    subgraph Training["Model release: move @champion (GitHub Actions)"]
+    subgraph GHA["GitHub Actions"]
         direction LR
-        CT["ct-retrain.yml"]
-        RB["rollback.yml"]
+        CR["Code release<br/>test, build, verify"]
+        MR["Model release<br/>train, gate, promote / rollback"]
     end
-    DVC -- "dvc pull<br/>selected version" --> CT
-    CT -- "1. log runs; register + move @champion<br/>only if gates pass" --> MLF[("DagsHub MLflow<br/>Tracking + Registry")]
-    RB -- "1. move @champion<br/>to an approved version" --> MLF
-    subgraph Delivery["Code release (GitHub Actions)"]
-        direction LR
-        STG["cd-staging<br/>build + smoke test"] --> GHCR[("GHCR image<br/>sha / tree tag")] --> PROD["cd-prod<br/>deploy by digest"]
+    GHCR[("GHCR<br/>verified images")]
+    MLF[("DagsHub MLflow<br/>Tracking + Registry")]
+    subgraph Render["Render"]
+        API["FastAPI + Web UI<br/>(slim Docker)"]
     end
-    subgraph Serving["Render"]
-        direction LR
-        User(["User"]) -- HTTPS --> API["FastAPI + Web UI<br/>(slim Docker)"]
-    end
-    PROD -- "deploy hook" --> API
+    User(["User"])
+
+    Repo -- "PR / merge" --> CR
+    Repo -- "manual dispatch" --> MR
+    DVC -- "dataset" --> MR
+    CR -- "image" --> GHCR
+    GHCR -- "deploy by digest" --> API
+    MR -- "1. log runs, move @champion" --> MLF
+    MR -. "2. after the move:<br/>POST /refresh" .-> API
     MLF -- "3. load @champion<br/>(also at startup)" --> API
-    Training -. "2. only after the alias moved:<br/>POST /refresh, then live check" .-> API
+    User -- HTTPS --> API
 ```
 
 * **Application & Inference**: Python, FastAPI, Pydantic, Scikit-Learn
