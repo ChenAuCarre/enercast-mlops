@@ -1,0 +1,43 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-}
+      MLFLOW_TRACKING_USERNAME: ${MLFLOW_TRACKING_USERNAME:-}
+      MLFLOW_TRACKING_PASSWORD: ${MLFLOW_TRACKING_PASSWORD:-}
+      REFRESH_API_TOKEN: ${REFRESH_API_TOKEN:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8000:8000"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  prometheus:
+    image: prom/prometheus:v3.13.5
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:13.3.1
+    environment:
+      GF_SMTP_ENABLED: "true"
+      GF_SMTP_HOST: ${SMTP_HOST:-}
+      GF_SMTP_USER: ${SMTP_USER:-}
+      GF_SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      GF_SMTP_FROM_ADDRESS: ${SMTP_FROM:-}
+    volumes:
+      - ./monitoring/grafana-datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro
+      - ./monitoring/grafana-alerting.yml:/etc/grafana/provisioning/alerting/alerting.yml:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+
+volumes:
+  grafana-data:

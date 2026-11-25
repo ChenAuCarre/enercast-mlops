@@ -1,0 +1,54 @@
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: wattwise-api
+    folder: WattWise
+    rules:
+      - uid: wattwise-api-down
+        orgId: 1
+        title: "WattWise API down"
+        condition: "A"
+        for: 1m
+        enabled: true
+        labels:
+          severity: critical
+          service: enercast-api
+          team: enercast
+        annotations:
+          summary: "WattWise prediction API is down"
+          description: "The /health endpoint of the prediction API has been unreachable for more than 1 minute."
+
+      - uid: wattwise-api-error-rate
+        orgId: 1
+        title: "WattWise API high error rate"
+        condition: "A"
+        for: 2m
+        enabled: true
+        labels:
+          severity: warning
+          service: enercast-api
+          team: enercast
+        for_expr: |
+          sum(rate(http_requests_total{job="api", status=~"5.."}[2m]))
+            /
+            clamp_min(sum(rate(http_requests_total{job="api"}[2m])), 1e-9)
+            > 0.05
+        annotations:
+          summary: "WattWise API error rate above 5%"
+          description: "More than 5% of /predict requests failed with a 5xx status over 2 minutes."
+
+      - uid: wattwise-api-drift
+        orgId: 1
+        title: "WattWise API data drift"
+        condition: "A"
+        for: 2m
+        enabled: true
+        labels:
+          severity: warning
+          service: enercast-api
+          team: enercast
+        for_expr: |
+          max by (feature) (feature_drift{job="api"}) >= 0.20
+        annotations:
+          summary: "WattWise API feature drift above threshold"
+          description: "A feature drifted at or above the 0.20 PSI threshold during the last 2 minutes; investigate, do not retrain automatically."
