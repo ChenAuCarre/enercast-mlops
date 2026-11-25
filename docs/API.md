@@ -30,7 +30,7 @@ On startup, the service queries the MLflow Model Registry, resolves `wattwise-en
 
 ## 1. Readiness Probe: `GET /health`
 
-Used by Render, Docker health checks, and CI/CD smoke tests to confirm that the service has initialized a champion model.
+Used by container orchestrators and CI/CD smoke tests to confirm that the service has initialized a champion model.
 
 ### Responses
 
