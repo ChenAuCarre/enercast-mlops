@@ -10,16 +10,29 @@
 
 ```mermaid
 flowchart TB
-    subgraph Training["Continuous Training"]
+    Repo["GitHub repo<br/>code + DVC pointers"]
+    DVC[("DagsHub Storage<br/>DVC remote")]
+    subgraph GHA["GitHub Actions"]
         direction LR
-        DVC[("DagsHub Storage<br/>DVC data v1/v2")] --> CT["GitHub Actions<br/>CT pipeline"]
+        CR["Code release<br/>test, build, verify"]
+        MR["Model release<br/>train, gate, promote / rollback"]
     end
-    CT -- "log + register<br/>(@champion if gates pass)" --> MLF[("DagsHub MLflow<br/>Tracking + Registry")]
-    subgraph Serving["Serving"]
-        direction LR
-        User(["User"]) -- HTTPS --> Host["Cloud Hosting"] --> API["FastAPI<br/>(Slim Docker)"]
+    GHCR[("GHCR<br/>verified images")]
+    MLF[("DagsHub MLflow<br/>Tracking + Registry")]
+    subgraph Render["Render"]
+        API["FastAPI + Web UI<br/>(slim Docker)"]
     end
-    MLF -- "load @champion" --> API
+    User(["User"])
+
+    Repo -- "PR / merge" --> CR
+    Repo -- "manual dispatch" --> MR
+    DVC -- "dataset" --> MR
+    CR -- "image" --> GHCR
+    GHCR -- "deploy by digest" --> API
+    MR -- "1. log runs, move @champion" --> MLF
+    MR -. "2. after the move:<br/>POST /refresh" .-> API
+    MLF -- "3. load @champion<br/>(also at startup)" --> API
+    User -- HTTPS --> API
 ```
 
 * **Application & Inference**: Python, FastAPI, Pydantic, Scikit-Learn
@@ -27,6 +40,26 @@ flowchart TB
 * **Experiment Tracking & Registry**: MLflow tracking server and model registry on DagsHub
 * **Containerization & Operations**: Slim Docker image, configured through environment variables
 * **Automation**: GitHub Actions for PR validation, staging verification, production deployment, gated continuous training, and rollback
+
+Code and model are released separately and meet only in the running service:
+Render runs the image, and the image loads `@champion` from MLflow at runtime.
+A code deploy never changes the model; a model change never redeploys the code.
+
+---
+
+## Branch Flow & Workflows
+
+```mermaid
+flowchart LR
+    F["feat/*"] -- "PR: ci-pass" --> DEV["dev"]
+    DEV -- "PR: ci-pass" --> STG["staging"]
+    STG -- "PR: ci-pass" --> MAIN["main"]
+    STG -. "on merge" .-> CDS["cd-staging<br/>build, smoke test,<br/>push to GHCR"]
+    MAIN -. "on merge" .-> CDP["cd-prod<br/>deploy the verified image,<br/>live smoke test"]
+    CDS -. "same tree hash" .-> CDP
+```
+
+`ci-pass` runs tests, lint, a Docker build and a container smoke test; a failing PR cannot merge. Details: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#workflows-and-the-branches-that-trigger-them), [`CONTRIBUTING.md`](CONTRIBUTING.md#2-git-branching--pull-request-workflow).
 
 ---
 

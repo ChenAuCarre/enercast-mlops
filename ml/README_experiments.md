@@ -75,6 +75,31 @@ The trigger is the delivery of a new dataset version, not a drift monitor:
 - No schedule or drift detector is configured. A future delivery would add a
   `v3` pointer and reuse the same workflow unchanged.
 
+One `ct-retrain.yml` run, from dispatch to decision:
+
+```mermaid
+flowchart TD
+    Start(["Dispatch ct-retrain.yml<br/>dataset-version = v1 or v2"]) --> Pull["dvc pull the selected pointer"]
+    Pull --> State{"Version matches<br/>registry state?"}
+    State -- "no: v1 with a champion (no force),<br/>or v2 without one" --> Stop1(["Fail, registry untouched"])
+    State -- yes --> Load["Verify the DVC MD5, split chronologically,<br/>check the data contract"]
+    Load -- violation --> Stop2(["Fail, registry untouched"])
+    Load -- v1 --> Base["Train the LinearRegression baseline"]
+    Base --> G1{"Validation MAE ≤ 65 Wh?"}
+    G1 -- no --> Stop3(["Fail, registry untouched"])
+    G1 -- yes --> Promote
+    Load -- v2 --> Score["Score the current champion<br/>on the v2 validation split"]
+    Score --> Cand["Train the HistGradientBoosting candidate<br/>on the v2 training split"]
+    Cand --> G2{"MAE ≤ 65 Wh and at least<br/>1% better than the champion?"}
+    G2 -- no --> Retain(["Champion retained,<br/>reason logged in ct-decision-v2"])
+    G2 -- yes --> Promote["Register the version, move @champion"]
+    Promote --> Refresh(["Refresh the service and verify it live"])
+```
+
+The gates are detailed in section 5. How the alias move reaches the live
+service is shown in
+[`docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md#how-a-model-change-reaches-the-service).
+
 ## 5. Quality gates and promotion policy
 
 The policy is implemented in `ml/policy.py`:
