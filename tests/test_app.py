@@ -184,3 +184,11 @@ def test_drift_recomputed_every_100_predictions(caplog):
     assert metrics.DRIFT.labels("T1")._value.get() > drift.THRESHOLD
     assert "Drift on T1" in caplog.text
     assert len(m.window) == 100 and m.window.maxlen == 500
+
+
+def test_log_level_applies_to_uvicorn_loggers():
+    logs.setup("WARNING")
+    try:
+        assert logging.getLogger("uvicorn.access").level == logging.WARNING
+    finally:
+        logs.setup("INFO")

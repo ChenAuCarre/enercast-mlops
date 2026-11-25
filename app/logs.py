@@ -27,5 +27,7 @@ def setup(level):
     logging.basicConfig(level=level, handlers=[handler], force=True)
     # Route uvicorn's and mlflow's own handlers through the JSON root handler.
     for name in ("uvicorn", "uvicorn.error", "uvicorn.access", "mlflow"):
-        logging.getLogger(name).handlers.clear()
-        logging.getLogger(name).propagate = True
+        logger = logging.getLogger(name)
+        logger.handlers.clear()
+        logger.propagate = True
+        logger.setLevel(level)
