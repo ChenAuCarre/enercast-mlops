@@ -1,17 +1,19 @@
 import logging
 import secrets
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pandas as pd
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from app import config
+from app import config, logs
 from app.model import ChampionHolder
 from app.schemas import PredictRequest, PredictResponse, RefreshResponse
 from ml.preprocess import preprocess_features
 
+logs.setup(config.LOG_LEVEL)
 log = logging.getLogger("app")
 holder = ChampionHolder()
 
@@ -26,6 +28,15 @@ async def lifespan(_):
 
 
 app = FastAPI(title="enercast-mlops", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def request_context(request: Request, call_next):
+    rid = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+    logs.request_id.set(rid)
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = rid
+    return response
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"

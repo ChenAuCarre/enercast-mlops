@@ -1,9 +1,11 @@
+import json
+import logging
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app import config, main, model
+from app import config, logs, main, model
 
 PAYLOAD = {
     "date": "2016-05-15 19:30:00",
@@ -133,3 +135,20 @@ def test_refresh_non_ascii_token_is_401(client, monkeypatch):
     with client() as c:
         r = c.post("/refresh", headers={"X-Refresh-Token": "é".encode("latin-1")})
     assert r.status_code == 401
+
+
+def test_request_id_echoed_or_generated(client):
+    with client() as c:
+        assert (
+            c.get("/health", headers={"X-Request-ID": "abc"}).headers["X-Request-ID"]
+            == "abc"
+        )
+        assert c.get("/health").headers["X-Request-ID"]
+
+
+def test_json_log_line_carries_request_id():
+    logs.request_id.set("r-1")
+    record = logging.LogRecord("app", logging.WARNING, "", 0, "hi %s", ("x",), None)
+    line = json.loads(logs.JsonFormatter().format(record))
+    assert line["message"] == "hi x" and line["request_id"] == "r-1"
+    assert line["level"] == "WARNING"
