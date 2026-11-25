@@ -59,13 +59,7 @@ flowchart LR
     CDS -. "same tree hash" .-> CDP
 ```
 
-* **`ci-pass`** (`ci-pr.yml`, every PR into `dev`, `staging` or `main`): lockfile, actionlint, gitleaks, ruff, pytest, Docker build and container smoke test, PR title. A failing PR cannot merge.
-* **`check-source`** (`enforce-source-branch.yml`): only `dev` → `staging` and `staging` → `main`.
-* **`cd-staging`** (merge to `staging`): validates the release candidate against the real registry, then publishes it as `:<commit-sha>` and `:tree-<tree-hash>`.
-* **`cd-prod`** (merge to `main`): deploys that exact image to Render by digest, waits until it is live, then smoke-tests the live URL with a real prediction and the expected `@champion` version.
-* **`ct-retrain`** / **`rollback`** (manual): change the served model without a redeploy.
-
-Full trigger table and reproduction steps: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#workflows-and-the-branches-that-trigger-them). Branch rules: [`CONTRIBUTING.md`](CONTRIBUTING.md#2-git-branching--pull-request-workflow).
+`ci-pass` runs tests, lint, a Docker build and a container smoke test; a failing PR cannot merge. Details: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#workflows-and-the-branches-that-trigger-them), [`CONTRIBUTING.md`](CONTRIBUTING.md#2-git-branching--pull-request-workflow).
 
 ---
 
