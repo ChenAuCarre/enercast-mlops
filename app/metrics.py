@@ -6,3 +6,4 @@ LATENCY = Histogram(
 )
 PREDICTIONS = Counter("predictions_total", "Predictions served", ["model_version"])
 SERVED_VERSION = Gauge("model_served_version", "Champion model version served")
+DRIFT = Gauge("feature_drift_psi", "PSI vs. training distribution", ["feature"])

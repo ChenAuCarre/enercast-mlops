@@ -2,10 +2,13 @@ import json
 import logging
 from types import SimpleNamespace
 
+import numpy as np
+import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from app import config, logs, main, model
+from app import config, drift, logs, main, metrics, model
+from ml.drift import training_distribution
 
 PAYLOAD = {
     "date": "2016-05-15 19:30:00",
@@ -124,9 +127,16 @@ def test_holder_load_swaps_model(monkeypatch):
     monkeypatch.setattr(model.registry, "load_model_version", lambda v: "new")
     run = SimpleNamespace(data=SimpleNamespace(params={"dataset_version": "v2"}))
     monkeypatch.setattr(model.mlflow, "get_run", lambda rid: run)
+    ref = {"T1": {"edges": [0.0], "proportions": [0.5, 0.5]}}
+    monkeypatch.setattr(model.mlflow.artifacts, "load_dict", lambda uri: ref)
+    artifact = SimpleNamespace(path="training_distribution.json")
+    client = SimpleNamespace(list_artifacts=lambda run_id: [artifact])
+    monkeypatch.setattr(model.registry, "get_client", lambda: client)
+    monkeypatch.setattr(model.drift.monitor, "reference", None)
     h = model.ChampionHolder()
     h.load()
     assert h.model == "new" and h.version == "3"
+    assert model.drift.monitor.reference == ref
     assert h.info["dataset_version"] == "v2"
 
 
@@ -162,3 +172,15 @@ def test_metrics_exposes_requests_and_predictions(client):
     assert "http_request_duration_seconds_bucket" in body
     assert 'predictions_total{model_version="2"}' in body
     assert "model_served_version" in body
+
+
+def test_drift_recomputed_every_100_predictions(caplog):
+    m = drift.DriftMonitor()
+    m.reference = training_distribution(pd.DataFrame({"T1": np.arange(100.0)}))
+    for _ in range(99):
+        m.add({"T1": 500.0})
+    assert "Drift on T1" not in caplog.text
+    m.add({"T1": 500.0})
+    assert metrics.DRIFT.labels("T1")._value.get() > drift.THRESHOLD
+    assert "Drift on T1" in caplog.text
+    assert len(m.window) == 100 and m.window.maxlen == 500

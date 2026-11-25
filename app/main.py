@@ -10,7 +10,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from app import config, logs, metrics
+from app import config, drift, logs, metrics
 from app.model import ChampionHolder
 from app.schemas import PredictRequest, PredictResponse, RefreshResponse
 from ml.preprocess import preprocess_features
@@ -94,6 +94,7 @@ def predict(req: PredictRequest):
     X = preprocess_features(pd.DataFrame([req.model_dump()]))
     y = float(model.predict(X)[0])
     metrics.PREDICTIONS.labels(info["resolved_version"]).inc()
+    drift.monitor.add(X.iloc[0].to_dict())
     return PredictResponse(
         predicted_appliances_wh=round(y, 2),
         model_name=info["model_name"],
