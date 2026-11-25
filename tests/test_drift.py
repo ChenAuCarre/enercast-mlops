@@ -81,3 +81,23 @@ def test_drift_tracker_keeps_a_window_of_the_last_predictions():
     # reset_every=2 -> recomputes on observations 2 and 4, with a window of 3.
     assert set(tracker.current()) == {"lights"}
     assert len(tracker.current()) == 1
+
+
+def test_load_drift_profile_feeds_the_tracker_with_real_training_profile(monkeypatch):
+    import pandas as pd
+
+    from app import main
+    from ml.train import build_training_profile
+
+    X = pd.DataFrame({"a": range(100), "b": [float(i % 7) for i in range(100)]})
+    profile = build_training_profile(X, "v1")
+    tracker = DriftTracker()
+    monkeypatch.setattr(main, "drift_tracker", tracker)
+    monkeypatch.setattr(main.holder, "training_profile", lambda: profile)
+
+    main._load_drift_profile()
+
+    assert tracker.enabled
+    tracker.observe({"a": 1.0, "b": 1.0})
+    assert set(tracker._buffers) == {"a", "b"}
+    assert all(len(buf) == 1 for buf in tracker._buffers.values())

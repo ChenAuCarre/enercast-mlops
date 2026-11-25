@@ -27,7 +27,8 @@ drift_tracker = DriftTracker()
 def _load_drift_profile():
     # Network fetch that can be slow or retry: never run it on the startup path.
     profile = holder.training_profile()
-    drift_tracker.configure(profile)
+    # the artifact nests per-feature stats under "features"
+    drift_tracker.configure((profile or {}).get("features"))
     log.log(
         logging.INFO,
         "drift_profile_loaded" if profile else "drift_profile_missing",
