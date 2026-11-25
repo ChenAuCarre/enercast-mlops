@@ -9,9 +9,9 @@ from app import metrics
 from ml import registry
 from ml.drift import DISTRIBUTION_ARTIFACT, psi
 
-WINDOW, EVERY, THRESHOLD = 500, 100, 0.20
+WINDOW, RECOMPUTE_EVERY, THRESHOLD = 500, 100, 0.20
 
-log = logging.getLogger("app.drift")
+log = logging.getLogger("app")
 
 
 def load_reference(run_id, version):
@@ -26,7 +26,7 @@ def load_reference(run_id, version):
 
 
 class DriftMonitor:
-    """PSI of the last WINDOW predictions' features, recomputed every EVERY."""
+    """PSI of the last WINDOW predictions' features, recomputed every RECOMPUTE_EVERY."""
 
     def __init__(self):
         self.lock = threading.Lock()
@@ -47,7 +47,7 @@ class DriftMonitor:
             self.window.append(features)
             self.count += 1
             reference = self.reference
-            if self.count % EVERY or reference is None:
+            if self.count % RECOMPUTE_EVERY or reference is None:
                 return
             frame = pd.DataFrame(list(self.window))
         for feature, ref in reference.items():
