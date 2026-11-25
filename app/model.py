@@ -15,7 +15,6 @@ class ChampionHolder:
     def __init__(self):
         # (model, info) swapped as one tuple so readers never see a mismatched pair.
         self.state = None
-        self._run_id = None  # run of the loaded champion, for its training profile
         self._training_profiles: dict[str, dict | None] = {}
 
     @property
@@ -42,7 +41,6 @@ class ChampionHolder:
             "dataset_version": params.get("dataset_version"),
             "loaded_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         }
-        self._run_id = mv.run_id
         self.state = (model, info)
 
     def training_profile(self) -> dict | None:
@@ -59,7 +57,7 @@ class ChampionHolder:
 
         key = str(version)
         if key not in self._training_profiles:
-            profile = self._load_training_profile(self._run_id)
+            profile = self._load_training_profile(self.info["mlflow_run_id"])
             if profile is None:
                 return None  # not cached: a transient failure can be retried
             self._training_profiles[key] = profile

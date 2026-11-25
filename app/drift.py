@@ -10,7 +10,7 @@ downloads it when the champion is loaded.
 
 The live distribution is the sliding window of the last predictions per
 feature. The drift is recomputed every ``DRIFT_WINDOW_RESET_EVERY`` predictions
-and compared to ``DRIFT_THRESHOLD``.
+and compared to ``DRIFT_THRESHOLD`` by the alerting rules.
 """
 
 from __future__ import annotations
@@ -26,7 +26,6 @@ DRIFT_THRESHOLD = 0.20
 DRIFT_WINDOW_SIZE = 500
 DRIFT_WINDOW_RESET_EVERY = 100
 DRIFT_BIN_COUNT = 10
-PSI_EPSILON = 1e-12
 
 
 def population_stability_index(
@@ -105,12 +104,10 @@ class DriftTracker:
     def __init__(
         self,
         reference: Mapping[str, Any] | None = None,
-        threshold: float = DRIFT_THRESHOLD,
         window_size: int = DRIFT_WINDOW_SIZE,
         reset_every: int = DRIFT_WINDOW_RESET_EVERY,
     ) -> None:
         self._reference = dict(reference) if reference else None
-        self._threshold = threshold
         self._window_size = window_size
         self._reset_every = reset_every
         self._buffers: dict[str, deque] = {

@@ -6,8 +6,7 @@ from app.drift import DriftTracker
 
 def _holder(run_id="run-1"):
     h = model.ChampionHolder()
-    h.state = (object(), {"resolved_version": "2"})
-    h._run_id = run_id
+    h.state = (object(), {"resolved_version": "2", "mlflow_run_id": run_id})
     return h
 
 
