@@ -209,7 +209,6 @@ def test_predict_logs_structured_prediction_and_request_events(client, monkeypat
     assert "prediction" in extra
     assert "latency_ms" in extra
     assert "feature_count" in extra
-    assert "missing_count" in extra
     assert extra["feature_count"] == 27
 
 

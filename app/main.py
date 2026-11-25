@@ -1,5 +1,4 @@
 import logging
-import math
 import secrets
 import threading
 import time
@@ -66,7 +65,7 @@ async def lifespan(_):
     app_logging.configure_logging()
     try:
         holder.load()
-        metrics.set_model_info(holder.version, loaded=True)
+        metrics.set_model_info(holder.version)
         log.log(
             logging.INFO,
             "model_loaded",
@@ -189,12 +188,10 @@ def predict(req: PredictRequest):
         logging.INFO,
         "prediction_made",
         extra={
-            "request_id": app_logging.get_request_id(),
             "model_version": str(info["resolved_version"]),
             "prediction": round(y, 2),
             "latency_ms": latency_ms,
             "feature_count": int(X.shape[1]),
-            "missing_count": _missing_count(req.model_dump()),
         },
     )
 
@@ -220,7 +217,7 @@ def refresh(x_refresh_token: str = Header(default="")):
         log.exception("Refresh failed; keeping previous model")
         raise HTTPException(502, "Refresh failed; see server logs") from exc
 
-    metrics.set_model_info(holder.version, loaded=True)
+    metrics.set_model_info(holder.version)
     _configure_drift(None)  # old reference no longer matches the new model
     _load_drift_profile_async()
 
@@ -228,7 +225,6 @@ def refresh(x_refresh_token: str = Header(default="")):
         logging.INFO,
         "model_refreshed",
         extra={
-            "request_id": app_logging.get_request_id(),
             "from_version": str(previous) if previous is not None else None,
             "to_version": str(holder.version) if holder.version is not None else None,
         },
@@ -237,16 +233,3 @@ def refresh(x_refresh_token: str = Header(default="")):
     return RefreshResponse(
         status="refreshed", previous_version=previous, current_version=holder.version
     )
-
-
-def _missing_count(payload: dict) -> int:
-    """Count missing values (None or non-finite numbers) in a prediction payload."""
-    missing = 0
-    for value in payload.values():
-        if (
-            value is None
-            or isinstance(value, float)
-            and (math.isnan(value) or math.isinf(value))
-        ):
-            missing += 1
-    return missing

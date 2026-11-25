@@ -138,12 +138,8 @@ class DriftTracker:
             return dict(self._drift)
 
     def _compute(self) -> dict[str, float]:
-        if not self.enabled or self._reference is None:
-            return {}
-
-        drifts: dict[str, float] = {}
-        for name, buffer in self._buffers.items():
-            samples = list(buffer)
-            drifts[name] = feature_drift(self._reference.get(name) or {}, samples)
-
-        return drifts
+        # Buffers exist only for features of the reference (none when disabled).
+        return {
+            name: feature_drift(self._reference[name], list(buffer))
+            for name, buffer in self._buffers.items()
+        }

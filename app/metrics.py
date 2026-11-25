@@ -29,7 +29,7 @@ prediction_value_wh = Histogram(
 
 model_info = Gauge(
     "model_info",
-    "Whether the champion model is currently loaded (1) or not (0)",
+    "Version of the loaded champion model (value is always 1)",
     ["model_version"],
 )
 
@@ -59,12 +59,10 @@ def observe_prediction(model_version: str, prediction_wh: float) -> None:
     )
 
 
-def set_model_info(version: str | None, loaded: bool) -> None:
-    """Report whether the champion model is currently loaded."""
+def set_model_info(version: str) -> None:
+    """Report the version of the loaded champion (no series until one loads)."""
     model_info.clear()  # drop the previous version's series on refresh
-    model_info.labels(model_version=str(version) if version else "none").set(
-        1.0 if loaded else 0.0
-    )
+    model_info.labels(model_version=str(version)).set(1)
 
 
 def set_feature_drift(feature: str, value: float) -> None:
