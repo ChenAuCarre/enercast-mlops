@@ -97,7 +97,7 @@ All 26 fields are required. Requests with missing fields, invalid timestamps, or
 | :--- | :--- | :--- | :--- | :--- |
 | `date` | `string` | Timestamp | Strict `YYYY-MM-DD HH:MM:SS` | Observation timestamp used to derive `hour` and `day_of_week`. ISO-8601 strings with `T` or timezone offsets are rejected. |
 | `lights` | `float` | `Wh` | `>= 0.0` | Energy use of household light fixtures. |
-| `T1` – `T9` | `float` | `°C` | `-20.0 <= T <= 60.0` | Temperatures across 9 house sensor zones (indoor rooms plus the north-side exterior building sensor `T6`). |
+| `T1` – `T9` | `float` | `°C` | `-20.0 <= T <= 60.0` | Temperatures across 9 house sensor zones. |
 | `RH_1` – `RH_9` | `float` | `%` | `0.0 <= RH <= 100.0` | Relative humidity across the same 9 sensor zones. |
 | `To` | `float` | `°C` | `-40.0 <= To <= 60.0` | Outdoor temperature from the Chièvres weather station. |
 | `Pressure` | `float` | `mm Hg` | `650.0 <= Pressure <= 850.0` | Atmospheric pressure. |
