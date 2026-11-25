@@ -10,7 +10,17 @@ services:
       REFRESH_API_TOKEN: ${REFRESH_API_TOKEN:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     logging:
       driver: json-file
       options:
@@ -21,12 +31,16 @@ services:
     image: prom/prometheus:v3.13.5
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
 
   grafana:
     image: grafana/grafana:13.3.1
+    depends_on:
+      - prometheus
     environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_SMTP_ENABLED: "true"
       GF_SMTP_HOST: ${SMTP_HOST:-}
       GF_SMTP_USER: ${SMTP_USER:-}
@@ -40,7 +54,8 @@ services:
       - ./monitoring/grafana-alerting.yml:/etc/grafana/provisioning/alerting/alerting.yml:ro
       - grafana-data:/var/lib/grafana
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
 
 volumes:
   grafana-data:
+  prometheus-data:
