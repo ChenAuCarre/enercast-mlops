@@ -38,9 +38,15 @@ def main() -> None:
     parser.add_argument("--file", required=True, help="CSV of observations to replay")
     parser.add_argument("--url", default="http://localhost:8000/predict")
     parser.add_argument("--rate", type=float, default=20, help="requests per second")
-    parser.add_argument("--limit", type=int, default=1000, help="number of rows to send")
-    parser.add_argument("--shuffle", action="store_true", help="send rows in random order")
-    parser.add_argument("--broken", action="store_true", help="send rows with a missing column")
+    parser.add_argument(
+        "--limit", type=int, default=1000, help="number of rows to send"
+    )
+    parser.add_argument(
+        "--shuffle", action="store_true", help="send rows in random order"
+    )
+    parser.add_argument(
+        "--broken", action="store_true", help="send rows with a missing column"
+    )
     args = parser.parse_args()
 
     with open(args.file, newline="", encoding="utf-8") as handle:
