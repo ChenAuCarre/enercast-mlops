@@ -1,5 +1,4 @@
 import math
-import time
 from types import SimpleNamespace
 
 import pytest
@@ -31,6 +30,8 @@ class FakeModel:
 @pytest.fixture
 def client(monkeypatch):
     """Factory: client(loaded=True) -> TestClient; all patches undone per test."""
+    # No background profile download (real MLflow) racing the next test's tracker.
+    monkeypatch.setattr(main, "_load_drift_profile_async", lambda: None)
 
     def make(loaded=True):
         info = {"model_name": "m", "alias": "champion", "resolved_version": "2"}
@@ -219,10 +220,10 @@ def test_predict_updates_the_feature_drift_gauge(client, monkeypatch):
         lambda: {"features": {"lights": {"deciles": [0.0, 10.0, 20.0], "mean": 10.0}}},
     )
 
+    # Load synchronously: stale background threads from earlier tests race otherwise.
+    monkeypatch.setattr(main, "_load_drift_profile_async", main._load_drift_profile)
+
     with client() as c:
-        deadline = time.time() + 5
-        while not main.drift_tracker.enabled and time.time() < deadline:
-            time.sleep(0.01)  # profile loads in a background thread
         for _ in range(100):
             assert c.post("/predict", json=PAYLOAD).status_code == 200
 
