@@ -252,14 +252,9 @@ In GitHub Actions:
 - Both workflows share the `ct-retrain-champion-registry` concurrency group,
   so they never move the alias concurrently. Their variables and secrets are
   listed in [`docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md#github-settings-used-by-the-workflows).
-- The three inference-service steps (refresh, health/model-info verification,
-  live prediction) are skipped with a warning when `API_BASE_URL` and
-  `REFRESH_API_TOKEN` are not configured. Training, evaluation, promotion, and
-  rollback still run and remain fully auditable in MLflow. Once the service is
-  deployed, configure both secrets and run `rollback.yml` targeting the current
-  champion version (or wait for the next promotion) to execute the live
-  verification. The job summary states whether the service was verified or
-  skipped.
+- If `API_BASE_URL` or `REFRESH_API_TOKEN` is missing, `ct-retrain.yml`
+  skips the live refresh and verification with a warning (the job summary
+  says so), and `rollback.yml` fails before moving the alias.
 - Both workflows can only be dispatched once they are on the default branch
   (`main`), so they run from released code.
 
