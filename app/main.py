@@ -29,12 +29,21 @@ def _configure_drift(reference):
     metrics.clear_feature_drift()  # no stale gauge values from the old reference
 
 
+# A short MLflow outage at startup must not leave drift off until a /refresh.
+PROFILE_RETRY_DELAYS_SECONDS = (10, 30, 60)
+
+
 def _load_drift_profile():
     # Network fetch that can be slow or retry: never run it on the startup path.
     version = holder.version
     if version is None:
         return  # nothing loaded: no champion to compare against
     profile = holder.training_profile()
+    for delay in PROFILE_RETRY_DELAYS_SECONDS:
+        if profile is not None or holder.version != version:
+            break
+        time.sleep(delay)
+        profile = holder.training_profile()
     if profile and profile.get("schema_version") != 2:
         profile = None  # older profiles have no bin shares: PSI would be wrong
     if holder.version != version:

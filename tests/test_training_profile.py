@@ -68,3 +68,16 @@ def test_old_profile_without_bin_shares_disables_drift(monkeypatch):
     main._load_drift_profile()
 
     assert not tracker.enabled
+
+
+def test_load_drift_profile_retries_after_a_transient_failure(monkeypatch):
+    tracker = DriftTracker()
+    monkeypatch.setattr(main, "drift_tracker", tracker)
+    monkeypatch.setattr(main, "PROFILE_RETRY_DELAYS_SECONDS", (0, 0))
+    monkeypatch.setattr(main.holder, "state", (object(), {"resolved_version": "2"}))
+    answers = iter([None, {"schema_version": 2, "features": {"a": {"mean": 1.0}}}])
+    monkeypatch.setattr(main.holder, "training_profile", lambda: next(answers))
+
+    main._load_drift_profile()
+
+    assert tracker.enabled
