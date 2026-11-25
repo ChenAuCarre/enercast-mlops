@@ -66,7 +66,7 @@ enercast-mlops/
 ├── docs/                    # API and deployment docs
 ├── ml/                      # Training, promotion policy, model registry
 ├── notebooks/               # Exploratory analysis
-├── scripts/                 # Helper scripts
+├── scripts/                 # Scripts used by GitHub Actions
 ├── tests/                   # Pytest suite
 ├── Dockerfile               # Production image
 ├── pyproject.toml           # Dependencies
