@@ -23,6 +23,9 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 DRIFT_THRESHOLD = 0.20
+# shortcut: 500 time-ordered readings (10 min apart) cover ~3.5 days, compared
+# against months of training data, so seasonal weather reads as drift; compare
+# against a same-season reference window if that becomes a real alert source.
 DRIFT_WINDOW_SIZE = 500
 DRIFT_WINDOW_RESET_EVERY = 100
 PSI_FLOOR = 1e-4  # empty bins would make log() infinite
