@@ -64,4 +64,5 @@ groups:
               refId: B
               type: threshold
               expression: A
+              # keep in sync with THRESHOLD in app/drift.py
               conditions: [{evaluator: {type: gt, params: [0.2]}}]

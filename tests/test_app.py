@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import config, drift, logs, main, model
+from ml.drift import DISTRIBUTION_ARTIFACT
 
 PAYLOAD = {
     "date": "2016-05-15 19:30:00",
@@ -126,7 +127,7 @@ def test_holder_load_swaps_model(monkeypatch):
     monkeypatch.setattr(model.mlflow, "get_run", lambda rid: run)
     ref = {"T1": {"edges": [0.0], "proportions": [0.5, 0.5]}}
     monkeypatch.setattr(drift.mlflow.artifacts, "load_dict", lambda uri: ref)
-    artifact = SimpleNamespace(path="training_distribution.json")
+    artifact = SimpleNamespace(path=DISTRIBUTION_ARTIFACT)
     client = SimpleNamespace(list_artifacts=lambda run_id: [artifact])
     monkeypatch.setattr(drift.registry, "get_client", lambda: client)
     monkeypatch.setattr(model.drift.monitor, "reference", None)
