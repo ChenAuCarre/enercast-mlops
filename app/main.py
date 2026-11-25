@@ -1,10 +1,11 @@
 import logging
 import secrets
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import pandas as pd
 from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app import config
 from app.model import ChampionHolder
@@ -27,9 +28,12 @@ async def lifespan(_):
 app = FastAPI(title="enercast-mlops", lifespan=lifespan)
 
 
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
 @app.get("/", include_in_schema=False)
 def root():
-    return RedirectResponse("/docs")
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.get("/health")

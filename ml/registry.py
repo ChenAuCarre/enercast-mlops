@@ -1,3 +1,4 @@
+import os
 import time
 
 import mlflow
@@ -23,6 +24,28 @@ _MISSING_CHAMPION_ERROR_CODES = {
 
 class NoChampionRegistered(RuntimeError):
     """No champion is registered yet in the MLflow registry."""
+
+
+class LocalRegistryWriteForbidden(RuntimeError):
+    """A local process tried to write to the shared MLflow registry."""
+
+
+def _require_github_actions(operation):
+    """Refuse registry writes outside GitHub Actions.
+
+    The shared registry is the production source of truth. Allowing a local
+    run to register or promote would let an unreviewed experiment move the
+    ``champion`` alias, which is exactly the failure this guard prevents.
+    Local exploration must use a local tracking URI (``file:./mlruns``) and
+    never write to the shared registry.
+    """
+    if os.getenv("GITHUB_ACTIONS") != "true":
+        raise LocalRegistryWriteForbidden(
+            f"{operation} refused: registry writes are only allowed from GitHub "
+            "Actions. Local runs must use a local tracking URI "
+            "(file:./mlruns) and must not register or promote models in the "
+            "shared registry."
+        )
 
 
 class PromotionAuthorizationError(RuntimeError):
@@ -112,6 +135,8 @@ def get_champion_version():
 
 
 def register_model(model_id, model_name=MODEL_NAME):
+    _require_github_actions(f"Registration on model {model_name}")
+
     model_uri = f"models:/{model_id}"
 
     registered = mlflow.register_model(
@@ -373,6 +398,8 @@ def promote_model(version, model_name=MODEL_NAME, authorization=None, candidate=
         ChampionAliasRestoreFailed: if a failure occurred after the alias move
             and the best-effort restore failed.
     """
+    _require_github_actions(f"Promotion on model {model_name}")
+
     if not isinstance(authorization, PromotionAuthorization):
         raise PromotionAuthorizationError(
             f"Promotion of version {version} on model {model_name} refused: no "
@@ -442,6 +469,8 @@ def rollback_champion(version, model_name=MODEL_NAME, reason=None):
             f"Rollback to version {version} on model {model_name} refused: an "
             "explicit reason is required."
         )
+
+    _require_github_actions(f"Rollback on model {model_name}")
 
     client = get_client()
 

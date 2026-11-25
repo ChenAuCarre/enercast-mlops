@@ -1,0 +1,326 @@
+name: rollback
+
+run-name: >-
+  Rollback to v${{ inputs['target-version'] }} on ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      target-version:
+        description: >-
+          Approved MLflow model version to restore as @champion (positive
+          integer). The version must be READY and carry champion_approved=true.
+        required: true
+        type: string
+      reason:
+        description: >-
+          Incident or ticket reference justifying the rollback. It is written
+          to the MLflow audit run.
+        required: true
+        type: string
+
+concurrency:
+  # Shared with ct-retrain.yml: both workflows move the champion alias and
+  # must never run concurrently.
+  group: ct-retrain-champion-registry
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # Never let a CI run rewrite the lockfile.
+  UV_FROZEN: "1"
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  rollback:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (github.ref_name == 'dev' || github.ref_name == 'staging' || github.ref_name == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.4.0
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        # A rollback only needs the core runtime dependencies (MLflow client),
+        # not the experiment group (DVC, Jupyter, plotting).
+        run: uv sync --frozen --no-default-groups
+
+      - name: Validate rollback inputs and service secrets
+        env:
+          TARGET_VERSION: ${{ inputs['target-version'] }}
+          REASON: ${{ inputs['reason'] }}
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+          REFRESH_API_TOKEN: ${{ secrets.REFRESH_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          case "$TARGET_VERSION" in
+            ''|*[!0-9]*)
+              echo "::error::target-version must be a positive integer MLflow model version."
+              exit 1
+              ;;
+          esac
+          if [ "$TARGET_VERSION" = "0" ]; then
+            echo "::error::target-version must be greater than zero."
+            exit 1
+          fi
+          if [ -z "${REASON//[[:space:]]/}" ]; then
+            echo "::error::reason must contain a non-empty incident or ticket reference."
+            exit 1
+          fi
+          if [ -z "${API_BASE_URL}" ] || [ -z "${REFRESH_API_TOKEN}" ]; then
+            echo "::error::The API_BASE_URL variable and the REFRESH_API_TOKEN secret are required to refresh and verify the live inference service during rollback."
+            exit 1
+          fi
+
+      - name: Resolve current champion version before rollback
+        id: champion_before
+        env:
+          MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_USERNAME: ${{ vars.MLFLOW_TRACKING_USERNAME }}
+          MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${MLFLOW_TRACKING_URI:?MLFLOW_TRACKING_URI secret is required}"
+          VERSION_FILE="${RUNNER_TEMP}/champion_version_before.txt"
+          ERROR_FILE="${RUNNER_TEMP}/champion_error_before.txt"
+          RC=0
+          uv run --no-sync python - <<'PY' > "$VERSION_FILE" 2> "$ERROR_FILE" || RC=$?
+          from ml.registry import NoChampionRegistered, get_champion
+
+          try:
+              print(get_champion().version)
+          except NoChampionRegistered:
+              # Recovery from a missing alias is allowed: rollback_champion()
+              # still verifies that the target version is READY and approved.
+              print("")
+          PY
+          if [ "${RC}" -ne 0 ]; then
+            echo "::error::Unable to resolve the current champion version from the MLflow registry."
+            cat "$ERROR_FILE"
+            exit 1
+          fi
+          VERSION="$(cat "$VERSION_FILE")"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Champion version before rollback: ${VERSION:-none}"
+
+      - name: Move champion alias to the approved target version
+        id: rollback
+        env:
+          TARGET_VERSION: ${{ inputs['target-version'] }}
+          REASON: ${{ inputs['reason'] }}
+          MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_USERNAME: ${{ vars.MLFLOW_TRACKING_USERNAME }}
+          MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${MLFLOW_TRACKING_URI:?MLFLOW_TRACKING_URI secret is required}"
+          : "${TARGET_VERSION:?target-version is required}"
+          : "${REASON:?reason is required}"
+          uv run --no-sync python - <<'PY'
+          import os
+
+          from ml.registry import rollback_champion
+
+          champion = rollback_champion(
+              os.environ["TARGET_VERSION"],
+              reason=os.environ["REASON"],
+          )
+          print(f"Champion restored: version {champion.version}")
+          PY
+
+      - name: Verify champion alias after rollback
+        id: champion_after
+        env:
+          TARGET_VERSION: ${{ inputs['target-version'] }}
+          MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_USERNAME: ${{ vars.MLFLOW_TRACKING_USERNAME }}
+          MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${MLFLOW_TRACKING_URI:?MLFLOW_TRACKING_URI secret is required}"
+          : "${TARGET_VERSION:?target-version is required}"
+          VERSION_FILE="${RUNNER_TEMP}/champion_version_after.txt"
+          ERROR_FILE="${RUNNER_TEMP}/champion_error_after.txt"
+          RC=0
+          uv run --no-sync python - <<'PY' > "$VERSION_FILE" 2> "$ERROR_FILE" || RC=$?
+          from ml.registry import NoChampionRegistered, get_champion
+
+          try:
+              print(get_champion().version)
+          except NoChampionRegistered:
+              raise SystemExit(3)
+          PY
+          if [ "${RC}" -eq 3 ]; then
+            echo "::error::No champion is registered after the rollback."
+            cat "$ERROR_FILE"
+            exit 1
+          fi
+          if [ "${RC}" -ne 0 ]; then
+            echo "::error::Unable to resolve the champion version after the rollback."
+            cat "$ERROR_FILE"
+            exit 1
+          fi
+          VERSION="$(cat "$VERSION_FILE")"
+          if [ "$VERSION" != "$TARGET_VERSION" ]; then
+            echo "::error::Champion alias points to version ${VERSION}, expected ${TARGET_VERSION}."
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Champion version after rollback: ${VERSION}"
+
+      - name: Refresh champion in the inference service
+        id: refresh
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+          REFRESH_API_TOKEN: ${{ secrets.REFRESH_API_TOKEN }}
+          EXPECTED_VERSION: ${{ steps.champion_after.outputs.version }}
+        run: |
+          set -euo pipefail
+          API_BASE_URL="${API_BASE_URL%/}"
+          RESPONSE_FILE="${RUNNER_TEMP}/refresh_response.json"
+          curl --fail-with-body --silent --show-error \
+            --max-time 120 \
+            --retry 3 --retry-delay 5 --retry-connrefused \
+            --request POST \
+            --header "X-Refresh-Token: ${REFRESH_API_TOKEN}" \
+            --output "$RESPONSE_FILE" \
+            "${API_BASE_URL}/refresh"
+          echo "Refresh response: $(cat "$RESPONSE_FILE")"
+          jq -e '.status == "refreshed"' "$RESPONSE_FILE" >/dev/null
+          CURRENT_VERSION="$(jq -r '.current_version // empty' "$RESPONSE_FILE")"
+          if [ -n "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "::error::The service reports current_version=${CURRENT_VERSION}, expected ${EXPECTED_VERSION}."
+            exit 1
+          fi
+
+      - name: Verify restored champion version
+        id: verify
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+          EXPECTED_VERSION: ${{ steps.champion_after.outputs.version }}
+          HEALTH_MAX_ATTEMPTS: "10"
+          HEALTH_RETRY_DELAY_SECONDS: "15"
+        run: |
+          set -euo pipefail
+          API_BASE_URL="${API_BASE_URL%/}"
+          HEALTH_FILE="${RUNNER_TEMP}/health_response.json"
+          ATTEMPT=0
+          while :; do
+            ATTEMPT=$((ATTEMPT + 1))
+            CODE="$(curl --silent --show-error --max-time 15 \
+              --output "$HEALTH_FILE" --write-out "%{http_code}" \
+              "${API_BASE_URL}/health" || true)"
+            case "$CODE" in
+              200) break ;;
+              000|408|429|5??) ;;
+              *)
+                echo "::error::Health endpoint returned HTTP ${CODE}; check API_BASE_URL and the service configuration."
+                cat "$HEALTH_FILE" || true
+                exit 1
+                ;;
+            esac
+            if [ "$ATTEMPT" -ge "$HEALTH_MAX_ATTEMPTS" ]; then
+              echo "::error::Health check failed after ${ATTEMPT} attempts (last HTTP code: ${CODE})."
+              cat "$HEALTH_FILE" || true
+              exit 1
+            fi
+            echo "Health check attempt ${ATTEMPT} failed (HTTP ${CODE}); retrying in ${HEALTH_RETRY_DELAY_SECONDS}s."
+            sleep "$HEALTH_RETRY_DELAY_SECONDS"
+          done
+          echo "Health response: $(cat "$HEALTH_FILE")"
+          jq -e '.status == "ready" and .model_loaded == true' "$HEALTH_FILE" >/dev/null
+          HEALTH_VERSION="$(jq -r '.model_version // empty' "$HEALTH_FILE")"
+          if [ -n "$HEALTH_VERSION" ] && [ "$HEALTH_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "::error::Health reports model_version=${HEALTH_VERSION}, expected ${EXPECTED_VERSION}."
+            exit 1
+          fi
+
+          MODEL_INFO_FILE="${RUNNER_TEMP}/model_info_response.json"
+          curl --fail-with-body --silent --show-error \
+            --max-time 30 --retry 3 --retry-delay 5 --retry-connrefused \
+            --output "$MODEL_INFO_FILE" \
+            "${API_BASE_URL}/model-info"
+          echo "Model info response: $(cat "$MODEL_INFO_FILE")"
+          RESOLVED_VERSION="$(jq -r '.resolved_version' "$MODEL_INFO_FILE")"
+          echo "Resolved champion version: ${RESOLVED_VERSION}"
+          if [ "$RESOLVED_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "::error::Restored champion version ${RESOLVED_VERSION} does not match the target version ${EXPECTED_VERSION}."
+            exit 1
+          fi
+
+      - name: Live prediction smoke test
+        id: smoke_test
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+          EXPECTED_VERSION: ${{ steps.champion_after.outputs.version }}
+        run: |
+          set -euo pipefail
+          API_BASE_URL="${API_BASE_URL%/}"
+          PAYLOAD='{"date": "2016-05-15 19:30:00", "lights": 20, "T1": 22.5, "RH_1": 41.2, "T2": 21.8, "RH_2": 40.5, "T3": 23.1, "RH_3": 39.8, "T4": 21.4, "RH_4": 38.9, "T5": 20.2, "RH_5": 48.1, "T6": 14.3, "RH_6": 62.0, "T7": 20.8, "RH_7": 37.5, "T8": 22.0, "RH_8": 42.1, "T9": 20.5, "RH_9": 41.0, "To": 13.8, "Pressure": 756.4, "RH_out": 65.0, "Windspeed": 4.2, "Visibility": 40.0, "Tdewpoint": 7.3}'
+          PREDICT_FILE="${RUNNER_TEMP}/predict_response.json"
+          curl --fail-with-body --silent --show-error \
+            --max-time 30 --retry 3 --retry-delay 5 --retry-connrefused \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --data "$PAYLOAD" \
+            --output "$PREDICT_FILE" \
+            "${API_BASE_URL}/predict"
+          echo "Prediction response: $(cat "$PREDICT_FILE")"
+          PREDICTED_VERSION="$(jq -r '.model_version // empty' "$PREDICT_FILE")"
+          if [ -z "$PREDICTED_VERSION" ]; then
+            echo "::error::Prediction response is missing the mandatory model_version field."
+            exit 1
+          fi
+          if [ "$PREDICTED_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "::error::Prediction was served by model version ${PREDICTED_VERSION}, expected ${EXPECTED_VERSION}."
+            exit 1
+          fi
+          jq -e '.predicted_appliances_wh | type == "number" and . >= 0' "$PREDICT_FILE" >/dev/null
+
+      - name: Publish rollback summary
+        if: always()
+        env:
+          TARGET_VERSION: ${{ inputs['target-version'] }}
+          BEFORE: ${{ steps.champion_before.outputs.version }}
+          AFTER: ${{ steps.champion_after.outputs.version }}
+          REASON: ${{ inputs['reason'] }}
+          SMOKE_OUTCOME: ${{ steps.smoke_test.outcome }}
+        run: |
+          SAFE_REASON="$(printf '%s' "$REASON" | tr '\n' ' ' | sed 's/|/\\|/g')"
+          {
+            echo "## Rollback summary"
+            echo ""
+            echo "| Item | Value |"
+            echo "| --- | --- |"
+            echo "| Target version | ${TARGET_VERSION} |"
+            echo "| Champion before | ${BEFORE:-none} |"
+            echo "| Champion after | ${AFTER:-unknown} |"
+            echo "| Reason | ${SAFE_REASON} |"
+            if [ "${SMOKE_OUTCOME}" = "success" ]; then
+              echo "| Inference service | Verified (refresh, health, model-info, prediction) |"
+            elif [ -n "${AFTER:-}" ]; then
+              echo "| Inference service | Failed during refresh or live verification |"
+            else
+              echo "| Inference service | Not reached (rollback failed before registry update) |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report rollback failure
+        if: failure()
+        env:
+          BEFORE: ${{ steps.champion_before.outputs.version }}
+        run: |
+          echo "::warning::Rollback failed. If the alias was already moved, investigate the service and re-run rollback.yml with a known-good approved version. Previous champion: ${BEFORE:-none}."
