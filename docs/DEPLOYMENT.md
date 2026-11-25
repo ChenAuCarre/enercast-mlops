@@ -17,8 +17,8 @@ All runtime settings are injected as environment variables; nothing is hard-code
 | `MLFLOW_TRACKING_URI` | Yes | DagsHub MLflow tracking server and model registry URL |
 | `MLFLOW_TRACKING_USERNAME` | Yes | DagsHub username |
 | `MLFLOW_TRACKING_PASSWORD` | Yes | DagsHub personal access token |
-| `REFRESH_API_TOKEN` | Yes (for live reloads) | Shared secret for `POST /refresh`; must match the GitHub Actions secret. Leaving it unset disables `/refresh` (`401`). |
-| `PORT` | Injected by Render | Listen port inside the container (defaults to `8000`) |
+| `REFRESH_API_TOKEN` | Yes (for live reloads); optional for local runs | Shared secret for `POST /refresh`; must match the GitHub Actions secret. Leaving it unset disables `/refresh` (`401`). |
+| `PORT` | Injected by Render; optional locally | Listen port inside the container (defaults to `8000`) |
 
 ---
 

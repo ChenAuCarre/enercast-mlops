@@ -37,15 +37,7 @@ When adding a new dependency, place it in the appropriate group and commit both 
 
 ### Environment Variables & Secrets
 
-Create a git-ignored `.env` file at the repository root when running the API container locally or reading from the shared MLflow server:
-
-| Variable | Required | Description |
-| :--- | :---: | :--- |
-| `MLFLOW_TRACKING_URI` | Yes | DagsHub MLflow tracking and registry URL |
-| `MLFLOW_TRACKING_USERNAME` | Yes | DagsHub username |
-| `MLFLOW_TRACKING_PASSWORD` | Yes | DagsHub personal access token (also used for the DVC remote) |
-| `REFRESH_API_TOKEN` | No | Shared secret for `POST /refresh`; leaving it unset disables `/refresh` (`401`) |
-| `PORT` | No | Listening port inside the container (default: `8000`) |
+For local runs, create a git-ignored `.env` at the repository root with the variables listed in [Runtime Configuration](docs/DEPLOYMENT.md#runtime-configuration-render). `MLFLOW_TRACKING_PASSWORD` is your DagsHub token, also used as the DVC remote password.
 
 > **Security rule:** Never commit or paste credentials into Git commits, notebook outputs, logs, screenshots, issues, or pull requests. `.env` and `.dvc/config.local` are git-ignored. If a token is ever exposed, rotate it immediately.
 
