@@ -49,7 +49,7 @@ Create a git-ignored `.env` file at the repository root when running the API con
 
 > **Security rule:** Never commit or paste credentials into Git commits, notebook outputs, logs, screenshots, issues, or pull requests. `.env` and `.dvc/config.local` are git-ignored. If a token is ever exposed, rotate it immediately.
 
-### Pull Datasets with DVC
+### DVC Remote
 
 Datasets are tracked with DVC and stored on DagsHub. Store your DagsHub credentials locally in `.dvc/config.local` (never edit the committed `.dvc/config`), then pull the tracked snapshots:
 

@@ -41,7 +41,7 @@ Merging `staging` → `main` creates a new merge commit SHA, but the repository 
 
 `ct-retrain.yml` and `rollback.yml` share the `ct-retrain-champion-registry` concurrency group (`cancel-in-progress: false`), guaranteeing that two workflows can never move the `@champion` alias simultaneously. `cd-staging.yml` and `cd-prod.yml` each serialize on their own concurrency groups (`cd-staging` and `cd-prod`).
 
-### GitHub Repository Variables & Secrets
+### GitHub Settings Used by the Workflows
 
 | Type | Name | Consumed By | Notes |
 | :--- | :--- | :--- | :--- |
@@ -89,7 +89,7 @@ To roll back the application container without touching the active model, either
 
 ---
 
-## Model Release, Live Refresh & Incident Recovery
+## How a Model Change Reaches the Service
 
 Model changes never redeploy the Docker container. Both `ct-retrain.yml` (when a candidate passes the promotion policy) and `rollback.yml` update `@champion` in MLflow and instruct the running service to reload it:
 
@@ -123,7 +123,7 @@ sequenceDiagram
 * **`ct-retrain.yml`**: Refreshes the service only when `@champion` actually changed. If `API_BASE_URL` or `REFRESH_API_TOKEN` is missing, the workflow skips live refresh and verification and emits a warning in the job summary (the alias update itself remains in MLflow).
 * **`rollback.yml`**: Validates that both `API_BASE_URL` and `REFRESH_API_TOKEN` are set **before** touching the registry, and fails fast if either is missing.
 
-### Failure Modes & Recovery Runbook
+### When the App Does Not Become Ready After a Model Change
 
 * **Failed `/refresh` (`502 Bad Gateway`)**: The running container keeps serving the previously loaded model so live traffic is not interrupted. `ct-retrain.yml` fails at the refresh step and logs a warning suggesting `rollback.yml` with the previous champion version.
 * **Container restart while `@champion` points to a broken version**: The process starts with no loaded model; `/health`, `/model-info`, and `/predict` return `503 Service Unavailable`, and `cd-prod.yml`'s smoke test fails.

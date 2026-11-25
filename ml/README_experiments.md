@@ -1,46 +1,135 @@
-# Experiment Tracking & Model Governance
+# Experiment Tracking and Model Selection
 
-This document describes the MLflow conventions, evaluation metric, model configurations, continuous training and promotion policy, benchmark evidence, and MLflow logging schema for `enercast-mlops`.
+This document describes the primary metric, the evaluation protocol, the
+quality gates, the MLflow tracking and registry conventions, and the evidence
+behind the production champion.
 
----
+## 1. MLflow setup
 
-## 1. MLflow Conventions & Write Guard
+- **Tracking server and model registry:** the shared, persistent MLflow server
+  hosted on DagsHub.
+- **Configuration:** `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME` and
+  `MLFLOW_TRACKING_PASSWORD` from the environment (see
+  [`docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md)).
+- **Experiment:** `WattWise-energy-forecasting-final`.
+- **Registered model:** `wattwise-energy-forecaster`.
+- **Champion alias:** `champion`.
+- **Approval tags:** `champion_approved=true` and
+  `champion_approval_reason` on the promoted model version.
+- **Local tracking:** `file:./mlruns` is acceptable for exploration only. The
+  continuous-training workflow and the deployed app must use the shared
+  registry. Registry writes (`register_model`, `promote_model`,
+  `rollback_champion`) are refused outside GitHub Actions.
 
-* **Tracking server & model registry:** Shared persistent MLflow server hosted on DagsHub (configured via `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME`, and `MLFLOW_TRACKING_PASSWORD`).
-* **Experiment name:** `WattWise-energy-forecasting-final`
-* **Registered model:** `wattwise-energy-forecaster` *(the `WattWise` prefix is the project's original MLflow identifier, kept unchanged for registry continuity)*
-* **Production alias:** `champion` (`models:/wattwise-energy-forecaster@champion`)
-* **Approval tags:** `champion_approved=true` and `champion_approval_reason` (written automatically onto every promoted version)
-* **Registry write guard:** `register_model`, `promote_model`, and `rollback_champion` in `ml/registry.py` raise `LocalRegistryWriteForbidden` unless `GITHUB_ACTIONS=true`. Local runs can explore with `MLFLOW_TRACKING_URI=file:./mlruns`, but only GitHub Actions workflows can modify the shared registry.
+How the inference service loads and reports the champion is described in
+[`docs/API.md`](../docs/API.md).
 
----
+## 2. Primary metric
 
-## 2. Primary Metric & Evaluation Protocol
+**MAE (Mean Absolute Error) in Wh. Lower is better.**
 
-### Primary Metric: MAE (Wh) — Lower Is Better
+Why MAE:
 
-* **Direct interpretability:** MAE is measured in Watt-hours (`Wh`), matching the target unit. An MAE of `41.2 Wh` means predictions differ from actual 10-minute consumption by `41.2 Wh` on average.
-* **Robustness to spikes:** The `Appliances` target is noisy and right-skewed (full-dataset median `60 Wh`, mean `97.7 Wh`, std `102.5 Wh`). Compared to RMSE, MAE avoids letting rare high-load spikes dominate model selection.
-* **Secondary diagnostics:** RMSE and R² are logged alongside MAE for diagnostic visibility. R² remains modest because indoor/weather readings explain only part of appliance usage variance (occupancy and device schedules are unobserved); R² is never used as a promotion gate.
+- The application predicts appliance energy consumption in Wh. MAE is directly
+  interpretable in the same unit: a MAE of 41 Wh means the prediction is off by
+  41 Wh on average.
+- The target is noisy and heavy-tailed (median 60 Wh, mean about 96 Wh). MAE is
+  less sensitive to a few large spikes than RMSE, so it better reflects the
+  typical user-facing error.
+- RMSE and R² are logged as secondary diagnostics. R² is low because the
+  available features explain only part of the consumption variance; it is not
+  the promotion gate.
 
-### Evaluation Rules
+## 3. Evaluation protocol
 
-* All splits are strictly chronological (never shuffled), reserving the final 15% of each training pool (`v1` or `v2`) for validation (`VALIDATION_FRACTION = 0.15`).
-* During continuous training, the current `@champion` and each candidate are evaluated on the **exact same validation split**.
-* `final_test.csv` (last 20% of the full dataset) is never accessed by `load_data`, `run_v1`, or `run_v2`. It is read solely by `python -m ml.pipeline --final-evaluation` for post-selection reporting.
+- All splits are chronological; the data is never shuffled.
+- The validation split is the last 15% of the selected training pool, rounded
+  down (`VALIDATION_FRACTION = 0.15` in `ml/splits.py`).
+- The final test is the last 20% of the full dataset. It is never used for
+  training, hyperparameter tuning, model selection, or promotion.
+- The champion and the candidate are scored on the **same validation
+  observations** of the selected dataset version.
+- The final test is used only by
+  `python -m ml.pipeline --final-evaluation` for reporting after model
+  selection.
+- `load_data`, `run_v1`, and `run_v2` never read the final test.
 
-See [`ml/README_data.md`](README_data.md#4-chronological-split-design--versions) for exact date boundaries, row counts, and DVC hashes.
+See `README_data.md` for the exact periods, row counts, and DVC hashes.
 
----
+## 4. Retraining rule
 
-## 3. Models & Hyperparameters
+The trigger is the delivery of a new dataset version, not a drift monitor:
 
-| Role | Run Name | Estimator | Dataset |
-| :--- | :--- | :--- | :--- |
+- `v1` is the initial release. It is dispatched once; the workflow refuses it
+  as soon as a champion exists.
+- `v2` is the first new delivery. It extends `v1` chronologically and is
+  dispatched manually through `workflow_dispatch`. Its arrival is the trigger
+  to retrain, and the workflow refuses `v2` while no champion exists.
+- Every CT run scores the current champion on the new validation split before
+  any candidate is trained. The candidate is then compared with the champion on
+  the same held-out observations.
+- Retraining therefore always happens for a new version, but promotion is not
+  automatic: the candidate must satisfy the quality floor and the minimum
+  improvement. Otherwise the champion is retained and the decision run logs the
+  reason.
+- No schedule or drift detector is configured. A future delivery would add a
+  `v3` pointer and reuse the same workflow unchanged.
+
+One `ct-retrain.yml` run, from dispatch to decision:
+
+```mermaid
+flowchart TD
+    Start(["Dispatch ct-retrain.yml<br/>dataset-version = v1 or v2"]) --> Pull["dvc pull the selected pointer"]
+    Pull --> State{"Version matches<br/>registry state?"}
+    State -- "no: v1 with a champion (no force),<br/>or v2 without one" --> Stop1(["Fail, registry untouched"])
+    State -- yes --> Load["Verify the DVC MD5, split chronologically,<br/>check the data contract"]
+    Load -- violation --> Stop2(["Fail, registry untouched"])
+    Load -- v1 --> Base["Train the LinearRegression baseline"]
+    Base --> G1{"Validation MAE ≤ 65 Wh?"}
+    G1 -- no --> Stop3(["Fail, registry untouched"])
+    G1 -- yes --> Promote
+    Load -- v2 --> Score["Score the current champion<br/>on the v2 validation split"]
+    Score --> Cand["Train the HistGradientBoosting candidate<br/>on the v2 training split"]
+    Cand --> G2{"MAE ≤ 65 Wh and at least<br/>1% better than the champion?"}
+    G2 -- no --> Retain(["Champion retained,<br/>reason logged in ct-decision-v2"])
+    G2 -- yes --> Promote["Register the version, move @champion"]
+    Promote --> Refresh(["Refresh the service and verify it live"])
+```
+
+The gates are detailed in section 5. How the alias move reaches the live
+service is shown in
+[`docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md#how-a-model-change-reaches-the-service).
+
+## 5. Quality gates and promotion policy
+
+The policy is implemented in `ml/policy.py`:
+
+- `MAX_MAE = 65.0` Wh: the quality floor.
+- `MIN_IMPROVEMENT = 0.01`: the candidate must improve the champion's MAE by at
+  least 1% on the same validation split.
+- The candidate MAE must be finite and non-negative.
+- The candidate must satisfy `0 <= MAE <= 65.0`.
+- The relative improvement is
+  `(champion_mae - candidate_mae) / champion_mae`; it must be at least `0.01`.
+- If no candidate passes, the current champion is retained and the decision run
+  records the rejection reason.
+- Initial release (`run_v1`): the baseline must satisfy `MAE <= 65`; it is
+  promoted as the first champion.
+- A promotion requires a typed `PromotionAuthorization` bound to the registered
+  version and the candidate name (`promote_model`). A direct alias edit is
+  refused by the registry code.
+- A rollback (`rollback_champion`) requires an explicit reason and a target
+  version that is `READY` and carries `champion_approved=true`. It is the only
+  other supported path that can move the alias.
+
+## 6. Models
+
+| Role | Run name | Estimator | Dataset |
+| --- | --- | --- | --- |
 | Baseline | `baseline-linear-regression-v1` | `LinearRegression` | `v1` |
 | Candidate | `candidate-hist-gradient-boosting-v2` | `HistGradientBoostingRegressor` | `v2` |
 
-Fixed candidate hyperparameters defined in `ml/train.py`:
+Candidate hyperparameters from `ml/train.py`:
 
 ```text
 loss=absolute_error
@@ -52,143 +141,169 @@ l2_regularization=1.0
 random_state=42
 ```
 
-### Design Rationale
+Why these models:
 
-* **`LinearRegression`** establishes a fast, interpretable baseline that validates the end-to-end training, registry, and serving pipeline.
-* **`HistGradientBoostingRegressor`** captures non-linear interactions across time, indoor zones, and weather while directly optimizing L1 error (`loss="absolute_error"`), aligning training with the MAE gate while staying fast for CPU training and inference.
-* Hyperparameters are fixed in source code rather than tuned iteratively on the small validation split (and never tuned on the final test), reducing overfitting risk.
+- `LinearRegression` is a simple, interpretable baseline. It establishes a
+  floor, validates the end-to-end pipeline, and is cheap to serve.
+- `HistGradientBoostingRegressor` captures non-linear interactions between
+  time, weather, and indoor conditions. The `absolute_error` loss directly
+  targets a MAE-like objective. The model remains fast enough for CPU training
+  and low-latency inference.
+- The candidate configuration is fixed in code. It was not tuned on the final
+  test; the fixed configuration also avoids overfitting the small validation
+  split.
 
----
+## 7. Evidence
 
-## 4. Continuous Training Flow & Promotion / Rollback Policy
+The metrics below were reproduced from the committed DVC snapshots with the
+committed code on 2026-11-24. They must match the corresponding shared MLflow
+runs (section 8) created by the first `v1` and `v2` workflow runs; those runs
+are the source of truth for the submitted evidence.
 
-### Retraining Trigger
-
-Retraining is triggered manually via `ct-retrain.yml` (`workflow_dispatch`) when a new dataset snapshot is delivered (no scheduled cron job or automated drift detector is configured):
-
-* **`v1` (initial release):** Establishes the baseline champion when no champion exists. If a champion already exists, `v1` fails unless `force-initial-training` (`--force-initial-training`) is explicitly enabled for a deliberate registry rebuild.
-* **`v2` (continuous training):** Requires an existing champion. Scores the active `@champion` on the `v2` validation split, trains the `v2` candidate on the `v2` training split, compares both on the `v2` validation split, logs a `ct-decision-v2` run recording the outcome, and promotes only if all policy gates pass. Adding a future `v3` snapshot follows the same pattern.
-
-```mermaid
-flowchart TD
-    Start(["Dispatch ct-retrain.yml<br/>dataset-version = v1 or v2"]) --> Pull["dvc pull selected pointer"]
-    Pull --> State{"Dataset version matches<br/>registry state?"}
-    State -- "no: v1 with champion (no force),<br/>or v2 without champion" --> Stop1(["Fail; registry untouched"])
-    State -- yes --> Load["Verify DVC MD5, split chronologically,<br/>enforce data contract"]
-    Load -- violation --> Stop2(["Fail; registry untouched"])
-    Load -- v1 --> Base["Train LinearRegression baseline"]
-    Base --> G1{"Validation MAE ≤ 65.0 Wh?"}
-    G1 -- no --> Stop3(["Fail; registry untouched"])
-    G1 -- yes --> Promote
-    Load -- v2 --> Score["Score current @champion<br/>on v2 validation split"]
-    Score --> Cand["Train HistGradientBoosting candidate<br/>on v2 training split"]
-    Cand --> Log["Log decision in ct-decision-v2"]
-    Log --> G2{"MAE ≤ 65.0 Wh and ≥ 1%<br/>better than @champion?"}
-    G2 -- no --> Retain(["Champion retained;<br/>rejection reason logged"])
-    G2 -- yes --> Promote["Register model, move @champion,<br/>tag champion_approved=true"]
-    Promote --> Refresh(["POST /refresh and verify live service"])
-```
-
-### Policy Gates & Authorization (`ml/policy.py`, `ml/registry.py`)
-
-* **Quality floor (`MAX_MAE = 65.0` Wh):** Candidate validation MAE must be finite and satisfy `0 <= MAE <= 65.0`.
-* **Minimum relative improvement (`MIN_IMPROVEMENT = 0.01`, i.e., 1%):** For continuous training (`v2`), relative improvement `(champion_mae - candidate_mae) / champion_mae` (rounded to 9 decimal places to avoid floating-point boundary artifacts) must be `>= 0.01`. If no candidate passes, the existing champion is retained and `ct-decision-v2` logs the rejection reason.
-* **Typed promotion authorization:** `promote_model()` refuses direct calls unless given a `PromotionAuthorization` produced by `PromotionAuthorization.from_decision()` bound to both the registered version and candidate name.
-* **Audited rollback:** `rollback_champion()` is the only other supported path that moves `@champion`. It requires a non-empty `reason` and a target version whose status is `READY` and whose MLflow tags include `champion_approved=true`.
-* **Automatic alias restoration:** If alias verification, audit logging, or approval tagging fails after `@champion` moves, `ml/registry.py` restores the previous alias (or deletes the newly created alias if no champion existed before).
-
----
-
-## 5. Benchmark Evidence
-
-The metrics below were reproduced from the committed DVC snapshots and source code on `2026-11-24`. The corresponding runs in the shared DagsHub MLflow server created by the `v1` and `v2` workflow dispatches serve as the authoritative audit record.
-
-### 5.1 Initial Release (`v1` Validation — 1,776 Rows)
+### 7.1 Initial release: v1 baseline on v1 validation
 
 | Model | Split | MAE (Wh) | RMSE (Wh) | R² |
-| :--- | :--- | ---: | ---: | ---: |
-| `LinearRegression` | `v1` validation | `49.892` | `88.710` | `0.0025` |
+| --- | --- | ---: | ---: | ---: |
+| `LinearRegression` | v1 validation (1,776 rows) | 49.892 | 88.710 | 0.0025 |
 
-The baseline satisfies `MAE <= 65.0 Wh` and is promoted as the initial `@champion`.
+The baseline satisfies the 65 Wh quality floor and becomes the initial
+champion. This is the evidence for the initial release.
 
-### 5.2 Continuous Training (`v2` Validation — 2,368 Rows)
-
-| Model | Split | MAE (Wh) | RMSE (Wh) | R² |
-| :--- | :--- | ---: | ---: | ---: |
-| Champion: `v1` `LinearRegression` | `v2` validation | `63.294` | `96.438` | `-0.0030` |
-| Candidate: `v2` `HistGradientBoosting` | `v2` validation | `41.192` | `90.021` | `0.1260` |
-
-* **Relative MAE improvement:** **34.92%** (well above the 1% minimum).
-* **Quality floor:** `41.192 Wh <= 65.0 Wh`.
-* **Decision:** **Promote** — `@champion` moves to the `v2` candidate. RMSE and R² also improve over the baseline.
-
-### 5.3 Independent Final Test (Reporting Only — 3,947 Rows)
+### 7.2 Continuous training: champion vs candidate on v2 validation
 
 | Model | Split | MAE (Wh) | RMSE (Wh) | R² |
-| :--- | :--- | ---: | ---: | ---: |
-| `v1` `LinearRegression` | `final_test` | `72.583` | `98.808` | `-0.1780` |
-| `v2` `HistGradientBoosting` | `final_test` | `55.576` | `89.997` | `0.0227` |
+| --- | --- | ---: | ---: | ---: |
+| Champion: v1 `LinearRegression` | v2 validation (2,368 rows) | 63.294 | 96.438 | -0.0030 |
+| Candidate: v2 `HistGradientBoosting` | v2 validation (2,368 rows) | 41.192 | 90.021 | 0.1260 |
 
-* Confirms the validation ranking with a **23.43%** MAE reduction (`72.583 Wh` → `55.576 Wh`).
-* The `v2` candidate remains below the `65.0 Wh` threshold on the held-out period, whereas the `v1` baseline exceeds it.
-* Measured strictly after model selection; these figures did not influence promotion.
+- Candidate MAE improvement: **34.92%**, above the 1% minimum.
+- Candidate MAE 41.192 Wh is below the 65 Wh quality floor.
+- Decision: **promote**; the champion alias moves to the new version.
+- The candidate improves both MAE and RMSE, and its R² is positive while the
+  champion's is slightly negative.
 
-### 5.4 Interpretation
+### 7.3 Final test (reporting only, never used for selection)
 
-Relative to the full-dataset mean (`97.7 Wh`, median `60 Wh`), the `v2` candidate's validation MAE (`41.2 Wh`) is ~42% of the mean compared with ~65% for the `v1` champion (`63.3 Wh`). Consistent improvements across both the `v2` validation window and the independent final test support promoting the gradient-boosted model to production.
+| Model | Split | MAE (Wh) | RMSE (Wh) | R² |
+| --- | --- | ---: | ---: | ---: |
+| v1 `LinearRegression` | final test (3,947 rows) | 72.583 | 98.808 | -0.1780 |
+| v2 `HistGradientBoosting` | final test (3,947 rows) | 55.576 | 89.997 | 0.0227 |
 
----
+- The final test confirms the ranking: the candidate reduces MAE by **23.43%**
+  (72.583 Wh to 55.576 Wh).
+- The candidate is below the 65 Wh floor on the final test; the baseline is
+  above it.
+- These numbers are reported after selection. They did not influence the
+  promotion decision.
 
-## 6. MLflow Logging Contract
+### 7.4 Interpretation
 
-### Training Runs (`run_experiment`)
+- The target is noisy: median 60 Wh, mean about 96 Wh. The candidate's 41.2 Wh
+  MAE on v2 validation is about 43% of the mean; the champion's 63.3 Wh is
+  about 66%.
+- R² is low because the available features explain only part of the appliance
+  consumption variance. MAE is the primary metric for the application.
+- The candidate's improvement is consistent on validation and on the final
+  test, which supports the production choice.
 
-* **Params:** estimator hyperparameters, `dataset_version`, `train_dvc_hash`, `git_commit`, `git_dirty`, `model_type`, `train_rows`, `validation_rows`, `feature_count`, `validation_fraction`, `train_period_start`, `train_period_end`, `validation_period_start`, `validation_period_end`
-* **Metrics:** `validation_mae`, `validation_rmse`, `validation_r2`
-* **Tags:** `git_commit`, `git_dirty`, `model_role`, `selection_split=validation`, `final_test_usage=separate_final_evaluation`, `final_test_used_for_selection=false`, `promotion_eligible=true`
-* **Artifacts:** fitted scikit-learn model (`model`), `metrics.json`, `validation_predictions.csv`
+## 8. What each run logs
 
-### CT Decision Runs (`ct-decision-<dataset_version>`, e.g. `ct-decision-v2`)
+### Training runs (`run_experiment`)
 
-* **Params:** `dataset_version`, `previous_champion_version`, `candidate_count`, `selection_split=validation`
-* **Metrics:** `champion_validation_mae`, `<candidate>_validation_mae`
-* **Tags:** `promotion_decision`, `selected_candidate`, `selection_split=validation`, `final_test_used_for_selection=false`, `decision_reason`
+- **Params:** model hyperparameters, `dataset_version`, `train_dvc_hash`,
+  `git_commit`, `git_dirty`, `model_type`, train/validation row counts,
+  `validation_fraction`, train and validation periods, feature count.
+- **Metrics:** `validation_mae`, `validation_rmse`, `validation_r2`.
+- **Tags:** `git_commit`, `git_dirty`, `model_role`,
+  `selection_split=validation`, `final_test_usage=separate_final_evaluation`,
+  `final_test_used_for_selection=false`, `promotion_eligible=true`.
+- **Artifacts:** the fitted model, `metrics.json`,
+  `validation_predictions.csv`.
 
-### Alias Audit Runs (`champion-alias-promote` / `champion-alias-rollback`)
+### CT decision run (`ct-decision-v2`)
 
-* **Params:** `model_name`, `operation`, `previous_champion_version`, `new_champion_version`, `decision_reason`
-* **Tags:** `champion_operation`, `champion_previous_version`, `champion_new_version`, `champion_authorized_by`, `champion_audit_result=success`
+- **Params:** `dataset_version`, `previous_champion_version`,
+  `candidate_count`, `selection_split=validation`.
+- **Metrics:** `champion_validation_mae`, `<candidate>_validation_mae`.
+- **Tags:** `promotion_decision`, `selected_candidate`, `selection_split`,
+  `final_test_used_for_selection=false`, `decision_reason`.
 
-### Final Evaluation Runs (`final-evaluation-<dataset_version>`)
+### Alias audit run (`champion-alias-promote` / `champion-alias-rollback`)
 
-* **Params:** `dataset_version`, `evaluated_model_version`, `test_dvc_hash`, `test_rows`, `test_period_start`, `test_period_end`
-* **Metrics:** `final_test_mae`, `final_test_rmse`, `final_test_r2`
-* **Tags:** `evaluation_split=final_test`, `final_test_usage=reporting_only`, `final_test_used_for_selection=false`, `promotion_eligible=false`
-* **Artifacts:** `metrics.json`, `final_test_predictions.csv`
+- **Params:** `model_name`, `operation`, `previous_champion_version`,
+  `new_champion_version`, `decision_reason`.
+- **Tags:** `champion_operation`, `champion_previous_version`,
+  `champion_new_version`, `champion_authorized_by`,
+  `champion_audit_result=success`.
 
----
+### Final evaluation run (`final-evaluation-v2`)
 
-## 7. Reproducing Experiments
+- **Params:** `dataset_version`, `evaluated_model_version`, `test_dvc_hash`,
+  `test_rows`, test period start/end.
+- **Metrics:** `final_test_mae`, `final_test_rmse`, `final_test_r2`.
+- **Tags:** `evaluation_split=final_test`,
+  `final_test_usage=reporting_only`, `final_test_used_for_selection=false`,
+  `promotion_eligible=false`.
+- **Artifacts:** `metrics.json`, `final_test_predictions.csv`.
 
-### Local Exploration
+## 9. How to reproduce
 
-After syncing dependencies and pulling DVC snapshots (see [`CONTRIBUTING.md`](../CONTRIBUTING.md#1-local-development-setup)), run local model comparison against a local MLflow store:
+Pull the dataset first with DVC (see `README_data.md`, section 6). Never commit
+`mlruns/`, `.dvc/config.local`, or any credential file.
+
+Local runs are for exploration only: `register_model`, `promote_model` and
+`rollback_champion` refuse to run unless `GITHUB_ACTIONS=true`, so a laptop
+cannot move the shared `champion` alias.
 
 ```bash
+uv sync --frozen --group experiment
+
+# Local tracking only: trains and logs runs, never registers or promotes.
 export MLFLOW_TRACKING_URI="file:./mlruns"
 uv run python -m ml.train
 ```
 
-`ml/train.py` trains both configured estimators on `v1`, logs runs locally to `mlruns/` (git-ignored), and prints validation metrics without registering or promoting models.
+In GitHub Actions, where the shared registry is reachable and the write guard
+passes:
 
-### Production Training & Rollback
+- `ct-retrain.yml` runs the initial release (`v1`) or continuous training
+  (`v2`), promotes only when the gates pass, refreshes the service, and verifies
+  the loaded version with a live prediction. Its `force-initial-training` input
+  allows a deliberate `v1` rebuild when a champion already exists; leave it off
+  for routine training.
+- `rollback.yml` restores a previously approved version, refreshes the service,
+  and verifies it with a live prediction.
+- Both workflows share the `ct-retrain-champion-registry` concurrency group,
+  so they never move the alias concurrently. Their variables and secrets are
+  listed in [`docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md#github-settings-used-by-the-workflows).
+- If `API_BASE_URL` or `REFRESH_API_TOKEN` is missing, `ct-retrain.yml`
+  skips the live refresh and verification with a warning (the job summary
+  says so), and `rollback.yml` fails before moving the alias.
+- Both workflows can only be dispatched once they are on the default branch
+  (`main`), so they run from released code.
 
-Production training (`ct-retrain.yml`), model rollback (`rollback.yml`), live service refresh, concurrency controls, and incident recovery are documented in [`docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md#model-release-live-refresh--incident-recovery).
+## 10. Decision log and rollback
 
----
+- Promotion is only possible through `promote_model` with a typed
+  `PromotionAuthorization`. The registry refuses a direct alias move.
+- The promotion audit run records the previous and new champion versions and
+  the policy reason.
+- When a candidate fails, the champion is retained and the `ct-decision-v2`
+  run records the rejection reason.
+- Rollback uses `rollback_champion` with an explicit reason. The target must be
+  `READY` and carry `champion_approved=true`. The rollback audit run records
+  the operation.
+- If the service does not become ready after a promotion, follow
+  [`docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md#when-the-app-does-not-become-ready-after-a-model-change).
 
-## 8. Known Limitations
+## 11. Known limitations
 
-* **Evaluation sample size:** The final test set contains 3,947 observations from a single household, introducing sampling uncertainty in reported metrics.
-* **Low explained variance (R²):** Without occupancy, appliance state, or weather forecast features, the model is suited for MAE-oriented forecasting rather than explaining total consumption variance.
-* **Fixed candidate configuration:** Hyperparameters are intentionally fixed to avoid overfitting the validation split; meaningful further accuracy gains would require richer features and a larger multi-building evaluation dataset.
+- The final test is small (3,947 rows) and covers a single household; the
+  reported metrics have sampling uncertainty.
+- R² is low. The model is useful for MAE-oriented decisions but does not
+  explain most of the variance.
+- The candidate configuration is fixed and was not tuned on the final test.
+  Further gains would require additional features (occupancy, weather
+  forecasts, time-of-day interactions) and a larger evaluation set.
+- The shared registry is the source of truth; local `mlruns/` runs are for
+  exploration only.
