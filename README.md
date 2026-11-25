@@ -60,18 +60,15 @@ curl https://enercast-mlops-tree.onrender.com/model-info
 
 ```text
 enercast-mlops/
-├── .github/workflows/       # ci-pr, enforce-source-branch, cd-staging, cd-prod, ct-retrain, rollback
-├── .dvc/                    # DVC remote configuration (DagsHub Storage)
-├── app/                     # FastAPI inference service, MLflow champion loader, web UI (static/)
-├── data/                    # DVC pointers: raw/, versions/v1, versions/v2, versions/test
-├── docs/                    # API.md, DEPLOYMENT.md
-├── ml/                      # Data prep, splits, training, promotion policy, registry, CT pipeline, ML docs
-├── notebooks/               # Exploratory data analysis
-├── scripts/smoke_test.sh    # Readiness, model version and live prediction check
-├── tests/                   # Pytest suite: API, preprocessing, splits, training, policy, registry
-├── Dockerfile               # Slim production image (runtime dependencies only)
-├── .dockerignore            # Keeps data, tests, docs and secrets out of the image
-├── pyproject.toml           # Dependencies, split into runtime / dev / experiment groups
-├── uv.lock                  # Locked dependency versions
+├── .github/workflows/       # CI/CD, continuous training, rollback
+├── app/                     # Inference API and web UI
+├── data/                    # DVC-tracked datasets
+├── docs/                    # API and deployment docs
+├── ml/                      # Training, promotion policy, model registry
+├── notebooks/               # Exploratory analysis
+├── scripts/                 # Helper scripts
+├── tests/                   # Pytest suite
+├── Dockerfile               # Production image
+├── pyproject.toml           # Dependencies
 └── CONTRIBUTING.md
 ```
