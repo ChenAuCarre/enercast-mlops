@@ -68,6 +68,9 @@ class FakeMlflow:
     def log_artifact(self, path):
         self.artifacts.append(path)
 
+    def log_dict(self, dictionary, artifact_file):
+        self.artifacts.append(artifact_file)
+
     @staticmethod
     def _log_model(**kwargs):
         return SimpleNamespace(model_id="model-1")

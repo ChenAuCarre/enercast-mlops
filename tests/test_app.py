@@ -1,9 +1,12 @@
+import json
+import logging
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app import config, main, model
+from app import config, drift, logs, main, model
+from ml.drift import DISTRIBUTION_ARTIFACT
 
 PAYLOAD = {
     "date": "2016-05-15 19:30:00",
@@ -122,9 +125,16 @@ def test_holder_load_swaps_model(monkeypatch):
     monkeypatch.setattr(model.registry, "load_model_version", lambda v: "new")
     run = SimpleNamespace(data=SimpleNamespace(params={"dataset_version": "v2"}))
     monkeypatch.setattr(model.mlflow, "get_run", lambda rid: run)
+    ref = {"T1": {"edges": [0.0], "proportions": [0.5, 0.5]}}
+    monkeypatch.setattr(drift.mlflow.artifacts, "load_dict", lambda uri: ref)
+    artifact = SimpleNamespace(path=DISTRIBUTION_ARTIFACT)
+    client = SimpleNamespace(list_artifacts=lambda run_id: [artifact])
+    monkeypatch.setattr(drift.registry, "get_client", lambda: client)
+    monkeypatch.setattr(model.drift.monitor, "reference", None)
     h = model.ChampionHolder()
     h.load()
     assert h.model == "new" and h.version == "3"
+    assert model.drift.monitor.reference == ref
     assert h.info["dataset_version"] == "v2"
 
 
@@ -133,3 +143,48 @@ def test_refresh_non_ascii_token_is_401(client, monkeypatch):
     with client() as c:
         r = c.post("/refresh", headers={"X-Refresh-Token": "é".encode("latin-1")})
     assert r.status_code == 401
+
+
+def test_request_id_echoed_or_generated(client):
+    with client() as c:
+        assert (
+            c.get("/health", headers={"X-Request-ID": "abc"}).headers["X-Request-ID"]
+            == "abc"
+        )
+        assert c.get("/health").headers["X-Request-ID"]
+
+
+def test_json_log_line_carries_request_id():
+    logs.request_id.set("r-1")
+    record = logging.LogRecord("app", logging.WARNING, "", 0, "hi %s", ("x",), None)
+    line = json.loads(logs.JsonFormatter().format(record))
+    assert line["message"] == "hi x" and line["request_id"] == "r-1"
+    assert line["level"] == "WARNING"
+
+
+def test_metrics_exposes_requests_and_predictions(client):
+    with client() as c:
+        c.post("/predict", json=PAYLOAD)
+        body = c.get("/metrics").text
+    assert 'http_requests_total{method="POST",path="/predict",status="200"}' in body
+    assert "http_request_duration_seconds_bucket" in body
+    assert 'predictions_total{model_version="2"}' in body
+    assert "model_served_version" in body
+
+
+def test_log_level_applies_to_uvicorn_loggers():
+    logs.setup("WARNING")
+    try:
+        assert logging.getLogger("uvicorn.access").level == logging.WARNING
+    finally:
+        logs.setup("INFO")
+
+
+def test_unhandled_error_still_echoes_request_id(client):
+    @main.app.get("/boom")
+    def boom():
+        raise RuntimeError("boom")
+
+    with client() as c:
+        r = c.get("/boom", headers={"X-Request-ID": "abc"})
+    assert r.status_code == 500 and r.headers["X-Request-ID"] == "abc"

@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>EnerCast — Prédiction de consommation électrique</title>
+  <title>EnerCast — Appliance Energy Consumption Prediction</title>
   <style>
     :root {
       --bg: #0f172a;
@@ -221,28 +221,28 @@
     <header>
       <div>
         <h1>EnerCast MLOps</h1>
-        <p class="subtitle">Prédiction de consommation des appareils électroménagers (Wh)</p>
+        <p class="subtitle">Appliance energy consumption prediction (Wh)</p>
       </div>
       <div class="badge-bar">
-        <span class="badge"><span id="status-dot" class="dot"></span><strong id="status-text">Chargement...</strong></span>
-        <span class="badge">Modèle : <strong id="badge-version">—</strong></span>
-        <span class="badge">Dataset : <strong id="badge-dataset">—</strong></span>
+        <span class="badge"><span id="status-dot" class="dot"></span><strong id="status-text">Loading...</strong></span>
+        <span class="badge">Model: <strong id="badge-version">—</strong></span>
+        <span class="badge">Dataset: <strong id="badge-dataset">—</strong></span>
       </div>
     </header>
 
     <div class="grid-layout">
-      <!-- Formulaire -->
+      <!-- Form -->
       <div class="card">
-        <h2>Paramètres des capteurs</h2>
+        <h2>Sensor Parameters</h2>
         <div class="presets">
-          <button type="button" class="btn-secondary" onclick="applyPreset('evening')">Preset : Soirée active (19h30)</button>
-          <button type="button" class="btn-secondary" onclick="applyPreset('night')">Preset : Nuit calme (03h00)</button>
-          <button type="button" class="btn-secondary" onclick="applyPreset('summer')">Preset : Après-midi chaud (15h00)</button>
+          <button type="button" class="btn-secondary" onclick="applyPreset('evening')">Preset: Active Evening (19:30)</button>
+          <button type="button" class="btn-secondary" onclick="applyPreset('night')">Preset: Quiet Night (03:00)</button>
+          <button type="button" class="btn-secondary" onclick="applyPreset('summer')">Preset: Warm Afternoon (15:00)</button>
         </div>
 
         <form id="predict-form">
           <fieldset>
-            <legend>Horodatage & Éclairage</legend>
+            <legend>Timestamp & Lighting</legend>
             <div class="fields-grid">
               <div class="field wide">
                 <label for="date">Date (YYYY-MM-DD HH:MM:SS)</label>
@@ -256,7 +256,7 @@
           </fieldset>
 
           <fieldset>
-            <legend>Météo extérieure</legend>
+            <legend>Outdoor Weather</legend>
             <div class="fields-grid">
               <div class="field"><label for="To">To (°C)</label><input id="To" name="To" type="number" step="any" min="-40" max="60" required /></div>
               <div class="field"><label for="RH_out">RH_out (%)</label><input id="RH_out" name="RH_out" type="number" step="any" min="0" max="100" required /></div>
@@ -268,22 +268,22 @@
           </fieldset>
 
           <fieldset>
-            <legend>Températures intérieures T1 – T9 (°C)</legend>
+            <legend>Indoor Temperatures T1 – T9 (°C)</legend>
             <div class="fields-grid" id="temp-fields"></div>
           </fieldset>
 
           <fieldset>
-            <legend>Humidités intérieures RH_1 – RH_9 (%)</legend>
+            <legend>Indoor Humidity RH_1 – RH_9 (%)</legend>
             <div class="fields-grid" id="rh-fields"></div>
           </fieldset>
 
-          <button id="submit-btn" type="submit" class="btn-primary">Prédire la consommation</button>
+          <button id="submit-btn" type="submit" class="btn-primary">Predict Consumption</button>
         </form>
       </div>
 
-      <!-- Résultat & Infos modèle -->
+      <!-- Result & Model Info -->
       <div class="card">
-        <h2>Résultat de l'inférence</h2>
+        <h2>Inference Result</h2>
         <div class="result-box">
           <div id="result-value" class="result-value">—</div>
           <div class="result-unit">Wh (Appliances)</div>
@@ -292,29 +292,29 @@
         <div id="error-banner" class="error-banner"></div>
 
         <div class="meta-list">
-          <div class="meta-row"><span>Nom du modèle</span><strong id="info-name">—</strong></div>
+          <div class="meta-row"><span>Model name</span><strong id="info-name">—</strong></div>
           <div class="meta-row"><span>Alias</span><strong id="info-alias">—</strong></div>
-          <div class="meta-row"><span>Version servie</span><strong id="info-version">—</strong></div>
-          <div class="meta-row"><span>Dataset d'entraînement</span><strong id="info-dataset">—</strong></div>
-          <div class="meta-row"><span>Run ID MLflow</span><strong id="info-run" style="font-size:0.75rem;">—</strong></div>
-          <div class="meta-row"><span>Chargé à (UTC)</span><strong id="info-loaded">—</strong></div>
+          <div class="meta-row"><span>Served version</span><strong id="info-version">—</strong></div>
+          <div class="meta-row"><span>Training dataset</span><strong id="info-dataset">—</strong></div>
+          <div class="meta-row"><span>MLflow Run ID</span><strong id="info-run" style="font-size:0.75rem;">—</strong></div>
+          <div class="meta-row"><span>Loaded at (UTC)</span><strong id="info-loaded">—</strong></div>
         </div>
 
-        <a class="docs-link" href="/docs" target="_blank">Accéder à la documentation OpenAPI (/docs) →</a>
+        <a class="docs-link" href="/docs" target="_blank">Open OpenAPI documentation (/docs) →</a>
       </div>
     </div>
   </div>
 
   <script>
     const TEMP_LABELS = [
-      "T1 (Cuisine)", "T2 (Salon)", "T3 (Buanderie)",
-      "T4 (Bureau)", "T5 (Salle de bain)", "T6 (Ext. Nord)",
-      "T7 (Repassage)", "T8 (Chambre ado)", "T9 (Chambre parents)"
+      "T1 (Kitchen)", "T2 (Living Room)", "T3 (Laundry Room)",
+      "T4 (Office)", "T5 (Bathroom)", "T6 (North Exterior)",
+      "T7 (Ironing Room)", "T8 (Teenager Room)", "T9 (Parents Room)"
     ];
     const RH_LABELS = [
-      "RH_1 (Cuisine)", "RH_2 (Salon)", "RH_3 (Buanderie)",
-      "RH_4 (Bureau)", "RH_5 (Salle de bain)", "RH_6 (Ext. Nord)",
-      "RH_7 (Repassage)", "RH_8 (Chambre ado)", "RH_9 (Chambre parents)"
+      "RH_1 (Kitchen)", "RH_2 (Living Room)", "RH_3 (Laundry Room)",
+      "RH_4 (Office)", "RH_5 (Bathroom)", "RH_6 (North Exterior)",
+      "RH_7 (Ironing Room)", "RH_8 (Teenager Room)", "RH_9 (Parents Room)"
     ];
 
     const PRESETS = {
@@ -375,7 +375,7 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const info = await res.json();
         dot.className = "dot ready";
-        statusText.textContent = "Service prêt";
+        statusText.textContent = "Service ready";
         document.getElementById("badge-version").textContent = `v${info.resolved_version}`;
         document.getElementById("badge-dataset").textContent = info.dataset_version || "—";
         document.getElementById("info-name").textContent = info.model_name;
@@ -386,7 +386,7 @@
         document.getElementById("info-loaded").textContent = info.loaded_at_utc;
       } catch (err) {
         dot.className = "dot error";
-        statusText.textContent = "Modèle indisponible";
+        statusText.textContent = "Model unavailable";
       }
     }
 
@@ -397,7 +397,7 @@
       const resVal = document.getElementById("result-value");
 
       btn.disabled = true;
-      btn.textContent = "Calcul en cours...";
+      btn.textContent = "Predicting...";
       errBanner.style.display = "none";
 
       const formData = new FormData(e.target);
@@ -416,7 +416,7 @@
         if (!res.ok) {
           const detail = Array.isArray(data.detail)
             ? data.detail.map(d => `${d.loc.slice(-1)[0]}: ${d.msg}`).join(" | ")
-            : (data.detail || `Erreur HTTP ${res.status}`);
+            : (data.detail || `HTTP Error ${res.status}`);
           throw new Error(detail);
         }
         resVal.textContent = data.predicted_appliances_wh.toFixed(2);
@@ -427,7 +427,7 @@
         errBanner.style.display = "block";
       } finally {
         btn.disabled = false;
-        btn.textContent = "Prédire la consommation";
+        btn.textContent = "Predict Consumption";
       }
     });
 

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
+from ml.drift import DISTRIBUTION_ARTIFACT
 from ml.train import (
     build_estimator,
     get_git_commit,
@@ -54,6 +55,9 @@ class FakeMlflow:
 
     def log_artifact(self, path):
         self.artifacts.append(path)
+
+    def log_dict(self, dictionary, artifact_file):
+        self.artifacts.append(artifact_file)
 
     @staticmethod
     def _log_model(**kwargs):
@@ -137,6 +141,7 @@ def test_run_experiment_instantiates_a_fresh_estimator_per_run(monkeypatch):
     assert fake_mlflow.tags["git_commit"] == "abc123"
     assert fake_mlflow.tags["git_dirty"] == "true"
     assert fake_mlflow.params["git_dirty"] == "true"
+    assert DISTRIBUTION_ARTIFACT in fake_mlflow.artifacts
 
 
 def test_get_git_commit_falls_back_to_unknown(monkeypatch):
