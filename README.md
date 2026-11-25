@@ -25,7 +25,7 @@ flowchart TB
 * **Application & Inference**: Python, FastAPI, Pydantic, Scikit-Learn
 * **Data Versioning**: DVC with DagsHub Storage remote
 * **Experiment Tracking & Registry**: MLflow tracking server and model registry on DagsHub
-* **Containerization & Operations**: Slim Docker image adhering to the [Twelve-Factor App](docs/DEPLOYMENT.md) methodology
+* **Containerization & Operations**: Slim Docker image, configured through environment variables
 * **Automation**: GitHub Actions for PR validation, staging verification, production deployment, gated continuous training, and rollback
 
 ---
@@ -50,7 +50,7 @@ curl https://enercast-mlops-tree.onrender.com/model-info
 | :--- | :--- |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Local setup, branch flow and protection, commits, PRs, local checks |
 | [`docs/API.md`](docs/API.md) | HTTP contract: endpoints, schemas, validation, errors, examples |
-| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Configuration, workflows and their triggers, deploying, recovery, twelve-factor |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Configuration, workflows and their triggers, deploying, recovery |
 | [`ml/README_data.md`](ml/README_data.md) | Dataset source, license, versions, splits, DVC hashes, data contract |
 | [`ml/README_experiments.md`](ml/README_experiments.md) | Metric, quality gates, MLflow runs, promotion evidence, CT and rollback logic |
 

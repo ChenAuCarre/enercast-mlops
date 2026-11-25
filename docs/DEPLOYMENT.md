@@ -92,20 +92,3 @@ tag or digest), or use Render's "Rollback" on a previous deploy. To roll back th
   the alias, refreshes the service and verifies it with a live prediction. If the service still
   fails on the restored version, the fault is the deployment, not the model: redeploy the last
   known-good image (see above).
-
-## Twelve-factor app
-
-| Factor | How this project applies it |
-|---|---|
-| I. Codebase | One Git repo; the same image is deployed to the CI container, the staging container and Render. |
-| II. Dependencies | Declared in `pyproject.toml`, pinned in `uv.lock`, installed with `uv sync --frozen`; CI fails if the lockfile is stale. The image installs only the runtime group. |
-| III. Config | Everything environment-specific (registry URI, credentials, refresh token, port) comes from environment variables: GitHub variables/secrets in Actions, Render environment in production, `.env` locally. Nothing is baked into the image. |
-| IV. Backing services | The MLflow registry is an attached resource addressed by `MLFLOW_TRACKING_URI`; pointing it at another server needs no code change. The DVC remote is used by training only, never by the web app. |
-| V. Build, release, run | Build: `cd-staging` builds and tags the image once. Release: `cd-prod` combines that image digest with Render's config. Run: Render starts the container. Model changes are a separate release axis (the `@champion` alias plus `/refresh`), with no rebuild. |
-| VI. Processes | The process is stateless: the model is an in-memory cache of the registry and can be reloaded at any time. No sessions, no local files written. |
-| VII. Port binding | Uvicorn binds `0.0.0.0:$PORT` (default `8000`); the app is self-contained and exports HTTP. |
-| VIII. Concurrency | Limited relevance: one Render instance runs one Uvicorn process, enough for the demo load. Scaling out means more instances; each loads the champion on start. Caveat: `/refresh` only reloads the instance that receives it, so with several instances a redeploy is the reliable way to switch models. |
-| IX. Disposability | The container starts in seconds plus model download, and `exec` makes Uvicorn PID 1 so it receives `SIGTERM` and shuts down cleanly. A failed model load does not crash the process; it starts with `/health` `503`. |
-| X. Dev/prod parity | The same Dockerfile and `uv.lock` are used locally, in CI and in production, against the same DagsHub registry. |
-| XI. Logs | Logs go unbuffered (`PYTHONUNBUFFERED=1`) to stdout/stderr; Render and `docker logs` collect them. The app does not manage log files. |
-| XII. Admin processes | Training, promotion, final evaluation and rollback are one-off processes (`python -m ml.pipeline`, `ml.registry`) run by `ct-retrain.yml` / `rollback.yml` from the same codebase and lockfile, never inside the web container. |
