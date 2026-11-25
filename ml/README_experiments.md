@@ -18,7 +18,8 @@ behind the production champion.
   `champion_approval_reason` on the promoted model version.
 - **Local tracking:** `file:./mlruns` is acceptable for exploration only. The
   continuous-training workflow and the deployed app must use the shared
-  registry.
+  registry. Registry writes (`register_model`, `promote_model`,
+  `rollback_champion`) are refused outside GitHub Actions.
 
 How the inference service loads and reports the champion is described in
 [`docs/API.md`](../docs/API.md).
@@ -225,28 +226,26 @@ champion. This is the evidence for the initial release.
 Pull the dataset first with DVC (see `README_data.md`, section 6). Never commit
 `mlruns/`, `.dvc/config.local`, or any credential file.
 
+Local runs are for exploration only: `register_model`, `promote_model` and
+`rollback_champion` refuse to run unless `GITHUB_ACTIONS=true`, so a laptop
+cannot move the shared `champion` alias.
+
 ```bash
 uv sync --frozen --group experiment
 
-export MLFLOW_TRACKING_URI="https://dagshub.com/<owner>/<repo>.mlflow"
-export MLFLOW_TRACKING_USERNAME="<username>"
-export MLFLOW_TRACKING_PASSWORD="<token>"
-
-# Initial release: only when no champion exists yet.
-uv run python -m ml.pipeline --dataset-version v1
-
-# Continuous training: requires an existing champion.
-uv run python -m ml.pipeline --dataset-version v2
-
-# Final reporting: after model selection; does not change the champion.
-uv run python -m ml.pipeline --final-evaluation
+# Local tracking only: trains and logs runs, never registers or promotes.
+export MLFLOW_TRACKING_URI="file:./mlruns"
+uv run python -m ml.train
 ```
 
-In GitHub Actions:
+In GitHub Actions, where the shared registry is reachable and the write guard
+passes:
 
 - `ct-retrain.yml` runs the initial release (`v1`) or continuous training
   (`v2`), promotes only when the gates pass, refreshes the service, and verifies
-  the loaded version with a live prediction.
+  the loaded version with a live prediction. Its `force-initial-training` input
+  allows a deliberate `v1` rebuild when a champion already exists; leave it off
+  for routine training.
 - `rollback.yml` restores a previously approved version, refreshes the service,
   and verifies it with a live prediction.
 - Both workflows share the `ct-retrain-champion-registry` concurrency group,
