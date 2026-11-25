@@ -27,8 +27,16 @@ Configuration is read from environment variables at start-up (`.env` is passed w
 | `REFRESH_API_TOKEN` | Token for `POST /refresh` (the endpoint is disabled when unset) |
 | `PORT` | Listen port, default `8000` (hosting platforms inject it) |
 
-To run the API with Prometheus and Grafana (`docker compose up`), see
-[MONITORING.md](MONITORING.md); its extra variables are in `.env.example`.
+Only for `docker compose up` (Prometheus + Grafana, see [MONITORING.md](MONITORING.md)); the API itself ignores them:
+
+| Variable | Purpose |
+|---|---|
+| `GRAFANA_ADMIN_PASSWORD` | **Required** Grafana admin password (compose refuses to start without it) |
+| `SMTP_ENABLED` | `true` to send alert emails, default `false` |
+| `SMTP_HOST` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` | SMTP server and sender, used when `SMTP_ENABLED=true` |
+| `ALERT_EMAIL_TO` | Alert recipient(s) |
+
+To run the API with Prometheus and Grafana, see [MONITORING.md](MONITORING.md).
 
 ## Workflows and the branches that trigger them
 
