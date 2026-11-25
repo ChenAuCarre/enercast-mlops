@@ -543,15 +543,15 @@
       "id": 6,
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": [],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
-        "textMode": "auto",
+        "textMode": "name",
         "wideLayout": true
       },
       "targets": [
@@ -561,8 +561,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "max(model_info)",
-          "legendFormat": "model_info",
+          "expr": "model_info{job=\"api\"} == 1",
+          "legendFormat": "v{{model_version}}",
           "range": true,
           "refId": "A"
         }
