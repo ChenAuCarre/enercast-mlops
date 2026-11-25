@@ -26,7 +26,10 @@ drift_tracker = DriftTracker()
 
 def _load_drift_profile():
     # Network fetch that can be slow or retry: never run it on the startup path.
+    version = holder.version
     profile = holder.training_profile()
+    if holder.version != version:
+        return  # a refresh moved the champion meanwhile; its own load will configure
     # the artifact nests per-feature stats under "features"
     drift_tracker.configure((profile or {}).get("features"))
     log.log(

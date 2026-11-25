@@ -1,9 +1,12 @@
 import json
+import logging
 from datetime import UTC, datetime
 
 import mlflow
 
 from ml import registry
+
+log = logging.getLogger("app")
 
 
 class ChampionHolder:
@@ -12,6 +15,7 @@ class ChampionHolder:
     def __init__(self):
         # (model, info) swapped as one tuple so readers never see a mismatched pair.
         self.state = None
+        self._run_id = None  # run of the loaded champion, for its training profile
         self._training_profiles: dict[str, dict | None] = {}
 
     @property
@@ -38,6 +42,7 @@ class ChampionHolder:
             "dataset_version": params.get("dataset_version"),
             "loaded_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         }
+        self._run_id = mv.run_id
         self.state = (model, info)
 
     def training_profile(self) -> dict | None:
@@ -54,20 +59,20 @@ class ChampionHolder:
 
         key = str(version)
         if key not in self._training_profiles:
-            self._training_profiles[key] = self._load_training_profile()
+            profile = self._load_training_profile(self._run_id)
+            if profile is None:
+                return None  # not cached: a transient failure can be retried
+            self._training_profiles[key] = profile
 
         return self._training_profiles[key]
 
-    def _load_training_profile(self) -> dict | None:
+    def _load_training_profile(self, run_id) -> dict | None:
         try:
-            mv = registry.get_champion()
             artifact_path = mlflow.artifacts.download_artifacts(
-                run_id=mv.run_id,
-                artifact_path="training-profile.json",
+                run_id=run_id, artifact_path="training-profile.json"
             )
-            with open(artifact_path, "r", encoding="utf-8") as handle:
-                profile = json.load(handle)
-            self._training_profiles[str(mv.version)] = profile
-            return profile
-        except Exception:  # noqa: BLE001 - drift is optional, never fatal
+            with open(artifact_path, encoding="utf-8") as handle:
+                return json.load(handle)
+        except Exception:  # drift is optional, never fatal
+            log.warning("training_profile_unavailable", exc_info=True)
             return None
