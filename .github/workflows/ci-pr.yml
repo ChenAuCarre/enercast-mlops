@@ -58,7 +58,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: docker build -t enercast:ci .
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: enercast:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: Smoke test container
         env:
           MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
