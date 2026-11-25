@@ -49,8 +49,6 @@ def population_stability_index(
     internal = values[1:-1][: max(bin_count - 1, 0)]
     bounds = [float("-inf")] + internal + [float("inf")]
     bins = len(bounds) - 1
-    if bins < 1:
-        return 0.0
 
     counts = [0] * bins
     n = len(samples)
@@ -64,14 +62,11 @@ def population_stability_index(
     reference_mass = 1.0 / bins
     for count in counts:
         observed_mass = count / n
-        if observed_mass <= 0.0 or reference_mass <= 0.0:
+        if observed_mass <= 0.0:
             continue
         psi_value += (observed_mass - reference_mass) * math.log(
             observed_mass / reference_mass
         )
-
-    if not math.isfinite(psi_value):
-        return DRIFT_THRESHOLD
 
     return float(psi_value)
 
