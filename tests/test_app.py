@@ -178,3 +178,13 @@ def test_log_level_applies_to_uvicorn_loggers():
         assert logging.getLogger("uvicorn.access").level == logging.WARNING
     finally:
         logs.setup("INFO")
+
+
+def test_unhandled_error_still_echoes_request_id(client):
+    @main.app.get("/boom")
+    def boom():
+        raise RuntimeError("boom")
+
+    with client() as c:
+        r = c.get("/boom", headers={"X-Request-ID": "abc"})
+    assert r.status_code == 500 and r.headers["X-Request-ID"] == "abc"
