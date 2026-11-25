@@ -51,13 +51,12 @@ A code deploy never changes the model; a model change never redeploys the code.
 
 ```mermaid
 flowchart LR
-    F["feature/*, fix/*,<br/>docs/*, ci/*"] -- "PR: ci-pass" --> DEV["dev"]
-    DEV -- "PR: ci-pass, check-source,<br/>1 approval" --> STG["staging"]
-    STG -- "PR: ci-pass, check-source,<br/>1 approval" --> MAIN["main"]
+    F["feat/*"] -- "PR: ci-pass" --> DEV["dev"]
+    DEV -- "PR: ci-pass" --> STG["staging"]
+    STG -- "PR: ci-pass" --> MAIN["main"]
     STG -. "on merge" .-> CDS["cd-staging<br/>build, smoke test,<br/>push to GHCR"]
     MAIN -. "on merge" .-> CDP["cd-prod<br/>deploy the verified image,<br/>live smoke test"]
     CDS -. "same tree hash" .-> CDP
-    MAN(["manual<br/>workflow_dispatch"]) -.-> MW["ct-retrain / rollback<br/>move @champion, refresh"]
 ```
 
 * **`ci-pass`** (`ci-pr.yml`, every PR into `dev`, `staging` or `main`): lockfile, actionlint, gitleaks, ruff, pytest, Docker build and container smoke test, PR title. A failing PR cannot merge.
