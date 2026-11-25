@@ -30,9 +30,9 @@ the MLflow run of the loaded champion version when it resolves the model.
 
 - Request lifecycle events: `http_request` (method, path, status, duration_ms) and
   `prediction_made` (model_version, prediction, latency_ms, feature_count, missing_count).
-- Model lifecycle events: `model_loaded`, `model_loaded_without_training_profile`,
-  `model_refreshed`.
-- Failed requests are logged with level `error`.
+- Model lifecycle events: `model_loaded`, `champion_model_load_failed`,
+  `drift_profile_loaded`, `drift_profile_missing`, `model_refreshed`.
+- 5xx responses are logged with level `error`, 4xx with `warning`.
 - The request id comes from the `X-Request-ID` header (generated when missing) and
   is echoed in the response and attached to every log line of the request.
 
@@ -48,7 +48,7 @@ The API serves its metrics at `GET /metrics` through `prometheus_client`.
 
 | Metric | Type | Labels / meaning |
 |---|---|---|
-| `http_requests_total` | Counter | `method`, `path`, `status` |
+| `http_requests_total` | Counter | `method`, `path` (route template, `unmatched` for unknown paths), `status` |
 | `http_request_duration_seconds` | Histogram | `path` |
 | `predictions_total` | Counter | `model_version` |
 | `prediction_value_wh` | Histogram | `model_version` (predicted appliance energy in Wh) |
@@ -63,7 +63,7 @@ The API serves its metrics at `GET /metrics` through `prometheus_client`.
 - Recomputed every 100 predictions (`DRIFT_WINDOW_RESET_EVERY`).
 - Threshold: `DRIFT_THRESHOLD = 0.20` (PSI).
 - When the champion has no training profile, drift monitoring is disabled and a
-  `model_loaded_without_training_profile` warning is logged; the service keeps
+  `drift_profile_missing` event is logged; the service keeps
   serving.
 
 ## Stack
@@ -76,7 +76,10 @@ docker compose logs api --no-log-prefix
 
 - API: http://localhost:8000
 - Prometheus: http://localhost:9090/targets
-- Grafana: http://localhost:3000 (admin/admin, then set a password or skip)
+- Grafana: http://localhost:3000 (user `admin`, password `GRAFANA_ADMIN_PASSWORD`, default `admin`)
+
+All ports are bound to `127.0.0.1`. Set `ALERT_EMAIL_TO` and the `SMTP_*` variables
+for alert emails (see `.env.example`).
 
 ## Replay
 
@@ -84,15 +87,22 @@ docker compose logs api --no-log-prefix
 python scripts/replay.py --file data/versions/v2/train.csv --url http://localhost:8000/predict --limit 20
 python scripts/replay.py --file data/versions/v2/train.csv --rate 5 --limit 1200 --broken
 python scripts/replay.py --file data/versions/v2/train.csv --shuffle --limit 20
+python scripts/replay.py --file data/versions/v2/train.csv --shift To=10 --limit 600
 ```
 
 `--broken` sends rows with a missing feature column (expected `422` responses).
+It exercises the 4xx logs and metrics; it does **not** trigger the 5xx error-rate
+alert, which needs real server errors (for example a champion that is not loaded,
+answering `503`).
+
+`--shift To=10` adds a delta to a feature in every row, to simulate drift and
+trigger the drift alert after 100+ predictions (repeat the flag for several features).
 
 ## Alerts
 
 The Grafana alerting rules provisioned in `monitoring/grafana-alerting.yml`:
 
-1. API down: the API target has been down for 1 minute.
+1. API down: the Prometheus scrape of the API (`up{job="api"}`) has failed for 1 minute (no data counts as down).
 2. High error rate: more than 5% of `/predict` requests failed with a 5xx status
    over 2 minutes.
 3. Data drift: a feature drifted at or above 0.20 PSI for 2 minutes.
