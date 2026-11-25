@@ -11,7 +11,7 @@
 ```mermaid
 flowchart TB
     DVC[("DagsHub Storage<br/>DVC remote")]
-    subgraph Training["Continuous Training & Rollback (GitHub Actions)"]
+    subgraph Training["Model release: move @champion (GitHub Actions)"]
         direction LR
         CT["ct-retrain.yml"]
         RB["rollback.yml"]
@@ -19,7 +19,7 @@ flowchart TB
     DVC -- "dvc pull<br/>selected version" --> CT
     CT -- "1. log runs; register + move @champion<br/>only if gates pass" --> MLF[("DagsHub MLflow<br/>Tracking + Registry")]
     RB -- "1. move @champion<br/>to an approved version" --> MLF
-    subgraph Delivery["CI/CD (GitHub Actions)"]
+    subgraph Delivery["Code release (GitHub Actions)"]
         direction LR
         STG["cd-staging<br/>build + smoke test"] --> GHCR[("GHCR image<br/>sha / tree tag")] --> PROD["cd-prod<br/>deploy by digest"]
     end
@@ -37,6 +37,33 @@ flowchart TB
 * **Experiment Tracking & Registry**: MLflow tracking server and model registry on DagsHub
 * **Containerization & Operations**: Slim Docker image, configured through environment variables
 * **Automation**: GitHub Actions for PR validation, staging verification, production deployment, gated continuous training, and rollback
+
+Code and model are released separately and meet only in the running service:
+Render runs the image, and the image loads `@champion` from MLflow at runtime.
+A code deploy never changes the model; a model change never redeploys the code.
+
+---
+
+## Branch Flow & Workflows
+
+```mermaid
+flowchart LR
+    F["feature/*, fix/*,<br/>docs/*, ci/*"] -- "PR: ci-pass" --> DEV["dev"]
+    DEV -- "PR: ci-pass, check-source,<br/>1 approval" --> STG["staging"]
+    STG -- "PR: ci-pass, check-source,<br/>1 approval" --> MAIN["main"]
+    STG -. "on merge" .-> CDS["cd-staging<br/>build, smoke test,<br/>push to GHCR"]
+    MAIN -. "on merge" .-> CDP["cd-prod<br/>deploy the verified image,<br/>live smoke test"]
+    CDS -. "same tree hash" .-> CDP
+    MAN(["manual<br/>workflow_dispatch"]) -.-> MW["ct-retrain / rollback<br/>move @champion, refresh"]
+```
+
+* **`ci-pass`** (`ci-pr.yml`, every PR into `dev`, `staging` or `main`): lockfile, actionlint, gitleaks, ruff, pytest, Docker build and container smoke test, PR title. A failing PR cannot merge.
+* **`check-source`** (`enforce-source-branch.yml`): only `dev` → `staging` and `staging` → `main`.
+* **`cd-staging`** (merge to `staging`): validates the release candidate against the real registry, then publishes it as `:<commit-sha>` and `:tree-<tree-hash>`.
+* **`cd-prod`** (merge to `main`): deploys that exact image to Render by digest, waits until it is live, then smoke-tests the live URL with a real prediction and the expected `@champion` version.
+* **`ct-retrain`** / **`rollback`** (manual): change the served model without a redeploy.
+
+Full trigger table and reproduction steps: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#workflows-and-the-branches-that-trigger-them). Branch rules: [`CONTRIBUTING.md`](CONTRIBUTING.md#2-git-branching--pull-request-workflow).
 
 ---
 

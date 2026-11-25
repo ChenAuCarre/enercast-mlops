@@ -97,6 +97,21 @@ v1 champion has not seen the observations used to compare it with the v2
 candidate. This is the key property that makes the continuous-training
 comparison fair.
 
+```mermaid
+gantt
+    title Chronological splits (2016)
+    dateFormat YYYY-MM-DD HH:mm
+    axisFormat %b %d
+    section v1 pool
+    train            : 2016-01-11 17:00, 2016-03-21 14:20
+    validation       : active, 2016-03-21 14:30, 2016-04-02 22:20
+    section v2 pool
+    train            : 2016-01-11 17:00, 2016-04-13 21:30
+    validation       : active, 2016-04-13 21:40, 2016-04-30 08:10
+    section final test
+    reporting only   : crit, 2016-04-30 08:20, 2016-05-27 18:00
+```
+
 ## 5. Dataset versions and changes
 
 | Version | Change |

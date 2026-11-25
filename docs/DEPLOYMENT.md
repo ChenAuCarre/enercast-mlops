@@ -77,6 +77,40 @@ To roll back the **code**, redeploy an earlier verified image the same way (its 
 tag or digest), or use Render's "Rollback" on a previous deploy. To roll back the **model**, use
 `rollback.yml` (no redeploy needed).
 
+## How a model change reaches the service
+
+A model change never redeploys the image. `ct-retrain.yml` (after a
+promotion) and `rollback.yml` move the `@champion` alias the same way, then
+make the running service reload it:
+
+```mermaid
+sequenceDiagram
+    participant GA as GitHub Actions<br/>(ct-retrain / rollback)
+    participant MLF as MLflow Registry
+    participant API as Service on Render
+
+    Note over GA: Promotion needs a PromotionAuthorization bound to the version.<br/>Rollback needs a reason and a READY target with champion_approved=true.
+    GA->>MLF: Move @champion to version N
+    GA->>MLF: Read the alias back, log the audit run<br/>(promotion also tags champion_approved=true)
+    alt any step after the move fails
+        GA->>MLF: Restore the previous alias
+    end
+    GA->>API: POST /refresh (X-Refresh-Token)
+    API->>MLF: Resolve @champion, load version N
+    alt load succeeds
+        API-->>GA: 200, current_version = N
+    else load fails
+        API-->>GA: 502, keeps serving the previous model
+    end
+    GA->>API: GET /health, GET /model-info, POST /predict
+    API-->>GA: Each reports version N
+```
+
+`/refresh` carries no model: the service resolves `@champion` itself, so only
+the registry decides what is served. `ct-retrain.yml` refreshes only when the
+alias moved; without `API_BASE_URL` or `REFRESH_API_TOKEN` it skips the
+refresh with a warning, while `rollback.yml` fails before moving the alias.
+
 ## When the app does not become ready after a model change
 
 - The service never reports ready without a model: `/health` is `200` only once a champion is
