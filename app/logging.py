@@ -19,8 +19,6 @@ from typing import Any
 
 from app import config
 
-REQUEST_ID_KEY = "request_id"
-
 # Attributes owned by logging.LogRecord; anything else found in the record is
 # treated as structured context and copied into the JSON payload.
 _RESERVED_LOG_RECORD_KEYS = frozenset(
@@ -54,10 +52,6 @@ _RESERVED_LOG_RECORD_KEYS = frozenset(
 _request_id_context: ContextVar[str] = ContextVar("app_request_id", default="")
 
 
-def _new_token() -> Any:
-    return _request_id_context.set("")
-
-
 def set_request_id(request_id: str) -> Any:
     """Bind a request id to the current context (middleware responsibility)."""
     return _request_id_context.set(request_id)
@@ -80,7 +74,7 @@ class JsonFormatter(logging.Formatter):
         payload: dict[str, Any] = {
             "timestamp": datetime.now(UTC).isoformat(timespec="milliseconds"),
             "level": record.levelname.lower(),
-            "event": str(record.msg),
+            "event": record.getMessage(),
             "logger": record.name,
         }
 
@@ -90,6 +84,10 @@ class JsonFormatter(logging.Formatter):
             if callable(value):
                 continue
             payload[key] = value
+
+        # Context-bound id, unless the call site passed request_id explicitly.
+        if "request_id" not in payload and (request_id := get_request_id()):
+            payload["request_id"] = request_id
 
         if record.exc_info:
             payload["exc"] = self.formatException(record.exc_info)

@@ -57,3 +57,27 @@ def test_configure_logging_sets_the_app_logger_level():
 
     expected_level = getattr(logging, config.LOG_LEVEL, logging.INFO)
     assert logging.getLogger("app").level == expected_level
+
+
+def test_json_formatter_formats_message_args():
+    record = logging.LogRecord(
+        "app", logging.INFO, __file__, 1, "loaded %s", ("v2",), None
+    )
+
+    assert (
+        json.loads(app_logging.JsonFormatter().format(record))["event"] == "loaded v2"
+    )
+
+
+def test_json_formatter_attaches_the_context_request_id():
+    token = app_logging.set_request_id("rid-9")
+    try:
+        with_context = json.loads(app_logging.JsonFormatter().format(_record()))
+        explicit = json.loads(
+            app_logging.JsonFormatter().format(_record(request_id="other"))
+        )
+    finally:
+        app_logging.reset_request_id(token)
+
+    assert with_context["request_id"] == "rid-9"
+    assert explicit["request_id"] == "other"
