@@ -60,6 +60,7 @@ def observe_prediction(model_version: str, prediction_wh: float) -> None:
 
 def set_model_info(version: str | None, loaded: bool) -> None:
     """Report whether the champion model is currently loaded."""
+    model_info.clear()  # drop the previous version's series on refresh
     model_info.labels(model_version=str(version) if version else "none").set(
         1.0 if loaded else 0.0
     )

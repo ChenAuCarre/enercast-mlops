@@ -45,6 +45,12 @@ async def lifespan(_):
     app_logging.configure_logging()
     try:
         holder.load()
+        metrics.set_model_info(holder.version, loaded=True)
+        log.log(
+            logging.INFO,
+            "model_loaded",
+            extra={"model_version": str(holder.version)},
+        )
     except Exception:  # start anyway; /health reports 503 until a refresh works
         # Surface the failure through a structured event so that the container
         # logs (and the CI smoke test `docker logs` dump) pinpoint the cause
@@ -56,11 +62,6 @@ async def lifespan(_):
             exc_info=True,
         )
 
-    log.log(
-        logging.INFO,
-        "model_loaded",
-        extra={"model_version": str(holder.version) if holder.version else None},
-    )
     _load_drift_profile_async()
 
     yield
@@ -190,6 +191,7 @@ def refresh(x_refresh_token: str = Header(default="")):
         log.exception("Refresh failed; keeping previous model")
         raise HTTPException(502, "Refresh failed; see server logs") from exc
 
+    metrics.set_model_info(holder.version, loaded=True)
     drift_tracker.configure(None)  # old reference no longer matches the new model
     _load_drift_profile_async()
 

@@ -244,3 +244,12 @@ def test_unhandled_exception_is_counted_as_a_500(client, monkeypatch):
         c.post("/predict", json=PAYLOAD)
 
     assert REGISTRY.get_sample_value("http_requests_total", labels) == before + 1
+
+
+def test_model_info_gauge_reports_the_loaded_version(client, monkeypatch):
+    monkeypatch.setattr(main.holder, "load", lambda: None)
+
+    with client():
+        pass
+
+    assert REGISTRY.get_sample_value("model_info", {"model_version": "2"}) == 1.0
