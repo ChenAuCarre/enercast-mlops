@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
+from prometheus_client import generate_latest
 
 from app import config, drift, logs, main, metrics, model
 from ml.drift import training_distribution
@@ -184,6 +185,16 @@ def test_drift_recomputed_every_100_predictions(caplog):
     assert metrics.DRIFT.labels("T1")._value.get() > drift.THRESHOLD
     assert "Drift on T1" in caplog.text
     assert len(m.window) == 100 and m.window.maxlen == 500
+
+
+def test_set_reference_clears_stale_drift():
+    m = drift.DriftMonitor()
+    m.reference = training_distribution(pd.DataFrame({"T1": np.arange(100.0)}))
+    for _ in range(100):
+        m.add({"T1": 500.0})
+    m.set_reference(None)
+    assert not m.window and m.count == 0
+    assert "feature_drift_psi{" not in generate_latest().decode()
 
 
 def test_log_level_applies_to_uvicorn_loggers():

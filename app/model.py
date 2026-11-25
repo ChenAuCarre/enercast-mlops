@@ -52,4 +52,4 @@ class ChampionHolder:
             reference = None
         self.state = (model, info)
         metrics.SERVED_VERSION.set(int(mv.version))
-        drift.monitor.reference = reference
+        drift.monitor.set_reference(reference)

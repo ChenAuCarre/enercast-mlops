@@ -21,6 +21,14 @@ class DriftMonitor:
         self.count = 0
         self.reference = None  # champion's training distribution, None disables
 
+    def set_reference(self, reference):
+        """Swap the reference and drop state computed against the old one."""
+        with self.lock:
+            self.reference = reference
+            self.window.clear()
+            self.count = 0
+        metrics.DRIFT.clear()
+
     def add(self, features):
         with self.lock:
             self.window.append(features)
