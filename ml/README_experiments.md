@@ -157,7 +157,7 @@ The baseline satisfies the 65 Wh quality floor and becomes the initial champion.
 - **Params:** model hyperparameters, `dataset_version`, `train_dvc_hash`, `git_commit`, `git_dirty`, `model_type`, train/validation row counts, `validation_fraction`, train and validation periods, feature count.
 - **Metrics:** `validation_mae`, `validation_rmse`, `validation_r2`.
 - **Tags:** `git_commit`, `git_dirty`, `model_role`, `selection_split=validation`, `final_test_usage=separate_final_evaluation`, `final_test_used_for_selection=false`, `promotion_eligible=true`.
-- **Artifacts:** fitted model, `metrics.json`, `validation_predictions.csv`.
+- **Artifacts:** fitted model, `metrics.json`, `validation_predictions.csv`, `training_distribution.json` (per-feature decile edges and proportions of the training split, the API's drift reference).
 
 ### CT decision run (`ct-decision-v2`)
 
