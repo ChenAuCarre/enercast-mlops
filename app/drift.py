@@ -96,15 +96,10 @@ class DriftTracker:
         window_size: int = DRIFT_WINDOW_SIZE,
         recompute_every: int = DRIFT_RECOMPUTE_EVERY,
     ) -> None:
-        self._reference = dict(reference) if reference else None
         self._window_size = window_size
         self._recompute_every = recompute_every
-        self._buffers: dict[str, deque] = {
-            name: deque(maxlen=window_size) for name in (self._reference or {})
-        }
-        self._observations = 0
-        self._drift: dict[str, float] = {}
         self._lock = threading.Lock()
+        self._reset(reference)
 
     @property
     def enabled(self) -> bool:
@@ -114,13 +109,15 @@ class DriftTracker:
     def configure(self, reference: Mapping[str, Any] | None) -> None:
         """(Re)configure the tracker with a champion training profile."""
         with self._lock:
-            self._reference = dict(reference) if reference else None
-            self._buffers = {
-                name: deque(maxlen=self._window_size)
-                for name in (self._reference or {})
-            }
-            self._drift = {}
-            self._observations = 0
+            self._reset(reference)
+
+    def _reset(self, reference: Mapping[str, Any] | None) -> None:
+        self._reference = dict(reference) if reference else None
+        self._buffers: dict[str, deque] = {
+            name: deque(maxlen=self._window_size) for name in (self._reference or {})
+        }
+        self._drift: dict[str, float] = {}
+        self._observations = 0
 
     def observe(self, values: Mapping[str, float]) -> dict[str, float] | None:
         """Append one prediction's features; return the drifts when recomputed."""

@@ -193,7 +193,8 @@ champion. This is the evidence for the initial release.
   `selection_split=validation`, `final_test_usage=separate_final_evaluation`,
   `final_test_used_for_selection=false`, `promotion_eligible=true`.
 - **Artifacts:** the fitted model, `metrics.json`,
-  `validation_predictions.csv`.
+  `validation_predictions.csv`, `training-profile.json` (per-feature `mean`,
+  `bin_edges` and `bin_shares`; the API's drift reference, see `app/drift.py`).
 
 ### CT decision run (`ct-decision-v2`)
 

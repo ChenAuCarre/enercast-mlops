@@ -33,6 +33,19 @@ class FakeModel:
 
 
 @pytest.fixture
+def log_events(monkeypatch):
+    """Capture the (level, event, extra) calls made on ``main.log``."""
+    events = []
+
+    class RecordingLog:
+        def log(self, level, event, extra=None, **kwargs):
+            events.append((level, event, extra))
+
+    monkeypatch.setattr(main, "log", RecordingLog())
+    return events
+
+
+@pytest.fixture
 def client(monkeypatch):
     """Factory: client(loaded=True) -> TestClient; all patches undone per test."""
     # No real MLflow download; a fresh drift state per test.
@@ -158,17 +171,13 @@ def test_refresh_non_ascii_token_is_401(client, monkeypatch):
     assert r.status_code == 401
 
 
-def test_health_503_when_the_champion_load_fails_at_startup(client, monkeypatch):
+def test_health_503_when_the_champion_load_fails_at_startup(
+    client, monkeypatch, log_events
+):
     def boom():
         raise RuntimeError("mlflow down")
 
-    events = []
-
-    class RecordingLog:
-        def log(self, level, event, extra=None, **kwargs):
-            events.append((level, event, extra))
-
-    monkeypatch.setattr(main, "log", RecordingLog())
+    events = log_events
 
     c = client(loaded=False)
     monkeypatch.setattr(main.holder, "load", boom)
@@ -206,14 +215,8 @@ def test_predict_echoes_a_request_id_and_generates_one(client):
     assert generated.headers["X-Request-ID"]
 
 
-def test_predict_logs_structured_prediction_and_request_events(client, monkeypatch):
-    events = []
-
-    class RecordingLog:
-        def log(self, level, event, extra=None, **kwargs):
-            events.append((level, event, extra))
-
-    monkeypatch.setattr(main, "log", RecordingLog())
+def test_predict_logs_structured_prediction_and_request_events(client, log_events):
+    events = log_events
 
     with client() as c:
         r = c.post("/predict", json=PAYLOAD)
@@ -330,14 +333,8 @@ def test_metrics_path_label_is_bounded_for_unknown_paths(client):
     )
 
 
-def test_client_errors_are_logged_as_warnings_not_errors(client, monkeypatch):
-    events = []
-
-    class RecordingLog:
-        def log(self, level, event, extra=None, **kwargs):
-            events.append((level, event, extra))
-
-    monkeypatch.setattr(main, "log", RecordingLog())
+def test_client_errors_are_logged_as_warnings_not_errors(client, log_events):
+    events = log_events
 
     with client() as c:
         assert c.post("/predict", json={**PAYLOAD, "RH_1": 101}).status_code == 422
