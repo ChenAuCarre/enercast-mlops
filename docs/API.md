@@ -2,8 +2,8 @@
 
 The inference service exposes a RESTful JSON API built with FastAPI. Upon startup (or when `/refresh` is invoked), the service queries the MLflow Model Registry, resolves the `@champion` alias to a concrete version number, and loads the corresponding model artifact into memory. If the load fails at startup the service still starts: `/health` returns `503` and `/model-info` / `/predict` return `503` until a `/refresh` succeeds.
 
-* **Base URL**: `https://<your-deployed-service-url>`
-* **OpenAPI / Swagger UI**: `https://<your-deployed-service-url>/docs`
+* **Base URL**: `https://enercast-mlops-tree.onrender.com`
+* **OpenAPI / Swagger UI**: `https://enercast-mlops-tree.onrender.com/docs`
 
 ---
 
