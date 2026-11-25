@@ -1,8 +1,8 @@
 # enercast-mlops
 
-**End-to-End Production MLOps Reference Project for Time-Series Energy Forecasting**
+**MLOps course project: an end-to-end ML lifecycle for household energy forecasting**
 
-`enercast-mlops` is a production-ready machine learning reference implementation built around the [UCI Appliances Energy Prediction](https://archive.ics.uci.edu/dataset/374/appliances+energy+prediction) dataset. It demonstrates how to take a time-series regression model from versioned data ingestion to automated Continuous Integration, Continuous Deployment, and Continuous Training (**CI/CD/CT**) with zero-downtime model promotion and rollback.
+`enercast-mlops` simulates how a machine learning model is trained, released and operated in a production setting. It predicts household appliance energy use (Wh) from the [UCI Appliances Energy Prediction](https://archive.ics.uci.edu/dataset/374/appliances+energy+prediction) dataset and covers the whole path: versioned data (DVC), tracked experiments and a model registry (MLflow), a containerized inference API, CI/CD with GitHub Actions, and continuous training with gated promotion and rollback.
 
 ---
 
