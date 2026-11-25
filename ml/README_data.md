@@ -142,8 +142,9 @@ uv run dvc pull data/versions/v2/train.csv.dvc
 uv run dvc pull data/versions/test/final_test.csv.dvc
 ```
 
-The `ct-retrain.yml` workflow configures the same credentials from GitHub
-secrets, then pulls only the pointer selected by the workflow input.
+The `ct-retrain.yml` workflow configures the same credentials from the
+`MLFLOW_TRACKING_USERNAME` variable and the `MLFLOW_TRACKING_PASSWORD`
+secret, then pulls only the pointer selected by the workflow input.
 
 ## 7. Data contract
 
