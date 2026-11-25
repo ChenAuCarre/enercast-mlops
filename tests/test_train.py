@@ -116,13 +116,11 @@ def test_build_training_profile_summarizes_each_feature():
 
     profile = build_training_profile(X_train, "v1")
 
-    assert profile["schema_version"] == 2
     assert profile["dataset_version"] == "v1"
     assert set(profile["features"]) == {"lights", "T1"}
 
     lights = profile["features"]["lights"]
-    assert set(lights) == {"mean", "bin_edges", "bin_shares"}
-    assert lights["mean"] == 12.0
+    assert set(lights) == {"bin_edges", "bin_shares"}
     assert lights["bin_edges"] == sorted(lights["bin_edges"])
     assert len(lights["bin_shares"]) == len(lights["bin_edges"]) + 1
     assert sum(lights["bin_shares"]) == pytest.approx(1.0)

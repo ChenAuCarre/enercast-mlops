@@ -37,23 +37,15 @@ def test_training_profile_failure_returns_none(monkeypatch):
 def _load_reference(monkeypatch, profile):
     tracker = DriftTracker()
     monkeypatch.setattr(main, "drift_tracker", tracker)
-    monkeypatch.setattr(main, "_drift_version", None)
     monkeypatch.setattr(main.holder, "state", (object(), {"resolved_version": "2"}))
     monkeypatch.setattr(main.holder, "training_profile", lambda: profile)
     main._load_drift_reference()
     return tracker
 
 
-def test_old_profile_without_bin_shares_disables_drift(monkeypatch):
-    profile = {"schema_version": 1, "features": {"a": {"deciles": [0.0, 1.0]}}}
-
-    assert not _load_reference(monkeypatch, profile).enabled
-    assert main._drift_version == "2"  # not retried before the next /refresh
-
-
 def test_day_of_week_is_not_tracked_for_drift(monkeypatch):
     stats = {"bin_edges": [1.0], "bin_shares": [0.5, 0.5]}
-    profile = {"schema_version": 2, "features": {"a": stats, "day_of_week": stats}}
+    profile = {"features": {"a": stats, "day_of_week": stats}}
 
     tracker = _load_reference(monkeypatch, profile)
 

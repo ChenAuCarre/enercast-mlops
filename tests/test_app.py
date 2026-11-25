@@ -51,7 +51,6 @@ def client(monkeypatch):
     # No real MLflow download; a fresh drift state per test.
     monkeypatch.setattr(main.holder, "training_profile", lambda: None)
     monkeypatch.setattr(main, "drift_tracker", DriftTracker())
-    monkeypatch.setattr(main, "_drift_version", None)
 
     def make(loaded=True):
         info = {"model_name": "m", "alias": "champion", "resolved_version": "2"}
@@ -70,7 +69,7 @@ def json_lines():
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)
     handler.setFormatter(JsonFormatter())
-    logger = logging.getLogger()  # configure_logging() clears the app logger's own
+    logger = logging.getLogger()  # the app logger propagates here
     logger.addHandler(handler)
     yield lambda: [json.loads(line) for line in stream.getvalue().splitlines()]
     logger.removeHandler(handler)
@@ -242,7 +241,6 @@ def test_predict_updates_the_feature_drift_gauge_and_logs_drift(
         main.holder,
         "training_profile",
         lambda: {
-            "schema_version": 2,
             "features": {"lights": {"bin_edges": [10.0], "bin_shares": [0.5, 0.5]}},
         },
     )
@@ -276,9 +274,7 @@ def test_predict_writes_json_lines_with_the_request_id(client, json_lines):
     assert long_id.headers["X-Request-ID"] == "x" * 64
 
 
-def test_drift_reference_loads_once_per_champion_and_again_after_refresh(
-    client, monkeypatch
-):
+def test_drift_reference_loads_at_startup_and_again_after_refresh(client, monkeypatch):
     monkeypatch.setattr(config, "REFRESH_API_TOKEN", "tok")
     calls = []
     monkeypatch.setattr(main.holder, "training_profile", lambda: calls.append(1))
@@ -286,7 +282,7 @@ def test_drift_reference_loads_once_per_champion_and_again_after_refresh(
     with client() as c:
         c.post("/predict", json=PAYLOAD)
         c.post("/predict", json=PAYLOAD)
-        assert len(calls) == 1  # a failed download is not retried per request
+        assert len(calls) == 1  # loaded at startup, not per request
         c.post("/refresh", headers={"X-Refresh-Token": "tok"})
         c.post("/predict", json=PAYLOAD)
 
@@ -307,15 +303,6 @@ def test_unhandled_exception_is_counted_as_a_500(client, monkeypatch):
     assert REGISTRY.get_sample_value("http_requests_total", labels) == before + 1
 
 
-def test_model_info_gauge_reports_the_loaded_version(client, monkeypatch):
-    monkeypatch.setattr(main.holder, "load", lambda: None)
-
-    with client():
-        pass
-
-    assert REGISTRY.get_sample_value("model_info", {"model_version": "2"}) == 1.0
-
-
 def test_metrics_path_label_is_bounded_for_unknown_paths(client):
     with client() as c:
         assert c.get("/no-such-path-123").status_code == 404
@@ -331,16 +318,6 @@ def test_metrics_path_label_is_bounded_for_unknown_paths(client):
         )
         is None
     )
-
-
-def test_client_errors_are_logged_as_warnings_not_errors(client, log_events):
-    events = log_events
-
-    with client() as c:
-        assert c.post("/predict", json={**PAYLOAD, "RH_1": 101}).status_code == 422
-
-    level, _, _ = next(e for e in events if e[1] == "http_request")
-    assert level == main.logging.WARNING
 
 
 def test_refresh_clears_the_stale_feature_drift_gauge(client, monkeypatch):
@@ -367,7 +344,10 @@ def test_predict_survives_a_monitoring_failure(client, monkeypatch):
     assert r.status_code == 200
 
 
-def test_predict_does_not_wait_for_a_busy_drift_lock(client):
-    # e.g. another request is stuck downloading the training profile
-    with main._drift_lock, client() as c:
-        assert c.post("/predict", json=PAYLOAD).status_code == 200
+def test_model_info_gauge_reports_the_loaded_version(client, monkeypatch):
+    monkeypatch.setattr(main.holder, "load", lambda: None)
+
+    with client():
+        pass
+
+    assert REGISTRY.get_sample_value("model_info", {"model_version": "2"}) == 1.0

@@ -11,8 +11,6 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-from app.drift import TRAINING_PROFILE_SCHEMA
-
 EXPERIMENT_NAME = "WattWise-energy-forecasting-final"
 
 # Version used by the fallback entry point `python -m ml.train`.
@@ -116,13 +114,11 @@ def build_training_profile(X_train, dataset_version):
             np.searchsorted(edges, series, side="left"), minlength=len(edges) + 1
         ) / len(series)
         features[name] = {
-            "mean": float(series.mean()),  # drift of constant features
             "bin_edges": [float(value) for value in edges],
             "bin_shares": [float(value) for value in shares],
         }
 
     return {
-        "schema_version": TRAINING_PROFILE_SCHEMA,
         "dataset_version": dataset_version,
         "features": features,
     }
