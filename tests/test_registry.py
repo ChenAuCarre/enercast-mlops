@@ -114,6 +114,13 @@ class FakeClient:
         if self.error is not None:
             raise self.error
 
+        if self.version is not None:
+            version_tags = {
+                k: v for (ver, k), v in self.tags.items() if ver == str(version)
+            }
+            existing_tags = getattr(self.version, "tags", None) or {}
+            self.version.tags = {**existing_tags, **version_tags}
+
         return self.version
 
     def set_registered_model_alias(self, name, alias, version):
@@ -139,13 +146,6 @@ class FakeClient:
 
         self.aliases.pop(alias, None)
 
-    def get_model_version_tag(self, name, version, key):
-        self.calls.append(("tag-get", name, version, key))
-
-        if self.error is not None:
-            raise self.error
-
-        return SimpleNamespace(value=self.tags.get((str(version), key)))
 
     def set_model_version_tag(self, name, version, key, value):
         self.calls.append(("tag-set", name, version, key, value))
