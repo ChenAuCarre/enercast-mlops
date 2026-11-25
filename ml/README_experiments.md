@@ -13,7 +13,7 @@ behind the production champion.
   environment. In GitHub Actions, the URI and username come from repository
   variables and the password from a repository secret.
 - **Experiment:** `WattWise-energy-forecasting-final`.
-- **Registered model:** `wattwise-energy-forecaster-final`.
+- **Registered model:** `wattwise-energy-forecaster`.
 - **Champion alias:** `champion`.
 - **Approval tags:** `champion_approved=true` and
   `champion_approval_reason` on the promoted model version.
