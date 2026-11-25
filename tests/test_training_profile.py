@@ -10,7 +10,7 @@ def _holder(run_id="run-1"):
     return h
 
 
-def test_training_profile_uses_the_loaded_run_and_caches_success(monkeypatch, tmp_path):
+def test_training_profile_uses_the_loaded_run(monkeypatch, tmp_path):
     path = tmp_path / "training-profile.json"
     path.write_text(json.dumps({"features": {}}))
     calls = []
@@ -20,64 +20,41 @@ def test_training_profile_uses_the_loaded_run_and_caches_success(monkeypatch, tm
         return str(path)
 
     monkeypatch.setattr(model.mlflow.artifacts, "download_artifacts", download)
-    h = _holder("run-7")
 
-    assert h.training_profile() == {"features": {}}
-    assert h.training_profile() == {"features": {}}
+    assert _holder("run-7").training_profile() == {"features": {}}
     assert calls == ["run-7"]
 
 
-def test_training_profile_failure_is_not_cached(monkeypatch):
+def test_training_profile_failure_returns_none(monkeypatch):
     def boom(**_):
         raise RuntimeError("mlflow down")
 
     monkeypatch.setattr(model.mlflow.artifacts, "download_artifacts", boom)
-    h = _holder()
 
-    assert h.training_profile() is None
-    assert h._training_profiles == {}
+    assert _holder().training_profile() is None
 
 
-def test_stale_profile_load_does_not_overwrite_a_newer_champion(monkeypatch):
+def _load_reference(monkeypatch, profile):
     tracker = DriftTracker()
     monkeypatch.setattr(main, "drift_tracker", tracker)
-
-    def slow_profile():
-        # a refresh lands while the download is in flight
-        main.holder.state = (object(), {"resolved_version": "3"})
-        return {"schema_version": 2, "features": {"a": {"mean": 1.0}}}
-
+    monkeypatch.setattr(main, "_drift_version", None)
     monkeypatch.setattr(main.holder, "state", (object(), {"resolved_version": "2"}))
-    monkeypatch.setattr(main.holder, "training_profile", slow_profile)
-
-    main._load_drift_profile()
-
-    assert not tracker.enabled
+    monkeypatch.setattr(main.holder, "training_profile", lambda: profile)
+    main._load_drift_reference()
+    return tracker
 
 
 def test_old_profile_without_bin_shares_disables_drift(monkeypatch):
-    tracker = DriftTracker()
-    monkeypatch.setattr(main, "drift_tracker", tracker)
-    monkeypatch.setattr(main.holder, "state", (object(), {"resolved_version": "2"}))
-    monkeypatch.setattr(
-        main.holder,
-        "training_profile",
-        lambda: {"schema_version": 1, "features": {"a": {"deciles": [0.0, 1.0]}}},
-    )
+    profile = {"schema_version": 1, "features": {"a": {"deciles": [0.0, 1.0]}}}
 
-    main._load_drift_profile()
-
-    assert not tracker.enabled
+    assert not _load_reference(monkeypatch, profile).enabled
+    assert main._drift_version == "2"  # not retried before the next /refresh
 
 
-def test_load_drift_profile_retries_after_a_transient_failure(monkeypatch):
-    tracker = DriftTracker()
-    monkeypatch.setattr(main, "drift_tracker", tracker)
-    monkeypatch.setattr(main, "PROFILE_RETRY_DELAYS_SECONDS", (0, 0))
-    monkeypatch.setattr(main.holder, "state", (object(), {"resolved_version": "2"}))
-    answers = iter([None, {"schema_version": 2, "features": {"a": {"mean": 1.0}}}])
-    monkeypatch.setattr(main.holder, "training_profile", lambda: next(answers))
+def test_day_of_week_is_not_tracked_for_drift(monkeypatch):
+    stats = {"bin_edges": [1.0], "bin_shares": [0.5, 0.5]}
+    profile = {"schema_version": 2, "features": {"a": stats, "day_of_week": stats}}
 
-    main._load_drift_profile()
+    tracker = _load_reference(monkeypatch, profile)
 
-    assert tracker.enabled
+    assert set(tracker._buffers) == {"a"}

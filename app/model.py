@@ -15,7 +15,6 @@ class ChampionHolder:
     def __init__(self):
         # (model, info) swapped as one tuple so readers never see a mismatched pair.
         self.state = None
-        self._training_profiles: dict[str, dict | None] = {}
 
     @property
     def model(self):
@@ -51,24 +50,12 @@ class ChampionHolder:
         example an older champion trained before the artifact existed) the
         drift monitoring stays disabled instead of failing the service.
         """
-        state = self.state  # one read: version and run id from the same model
-        if state is None:
+        info = self.info
+        if info is None:
             return None
-        info = state[1]
-
-        key = str(info["resolved_version"])
-        if key not in self._training_profiles:
-            profile = self._load_training_profile(info["mlflow_run_id"])
-            if profile is None:
-                return None  # not cached: a transient failure can be retried
-            self._training_profiles[key] = profile
-
-        return self._training_profiles[key]
-
-    def _load_training_profile(self, run_id) -> dict | None:
         try:
             artifact_path = mlflow.artifacts.download_artifacts(
-                run_id=run_id, artifact_path="training-profile.json"
+                run_id=info["mlflow_run_id"], artifact_path="training-profile.json"
             )
             with open(artifact_path, encoding="utf-8") as handle:
                 return json.load(handle)

@@ -6,7 +6,7 @@ training distribution of the champion, using a Population Stability Index
 
 The reference distribution comes from the ``training-profile.json`` artifact
 logged by the training run of the champion version (see ``ml.train``); the API
-downloads it when the champion is loaded.
+downloads it on the first prediction of each champion version.
 
 The live distribution is the sliding window of the last predictions per
 feature. The drift is recomputed every ``DRIFT_WINDOW_RESET_EVERY`` predictions

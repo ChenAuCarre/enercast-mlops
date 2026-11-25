@@ -71,7 +71,7 @@ def test_feature_drift_uses_a_relative_shift_for_constant_features():
 
 
 def test_feature_drift_returns_zero_without_samples():
-    assert feature_drift({"deciles": [0.0, 10.0], "mean": 5.0}, []) == 0.0
+    assert feature_drift({"bin_edges": [5.0], "bin_shares": [0.5, 0.5]}, []) == 0.0
 
 
 def test_drift_tracker_is_disabled_without_a_reference():
@@ -83,7 +83,9 @@ def test_drift_tracker_is_disabled_without_a_reference():
 
 def test_drift_tracker_recomputes_drift_every_reset_every_observations():
     tracker = DriftTracker(
-        reference={"lights": {"deciles": [0.0, 10.0, 20.0], "mean": 10.0}},
+        reference={
+            "lights": {"bin_edges": [0.0, 10.0, 20.0], "bin_shares": [0.25] * 4}
+        },
         reset_every=100,
     )
 
@@ -101,12 +103,16 @@ def test_drift_tracker_recomputes_drift_every_reset_every_observations():
 
 def test_drift_tracker_keeps_a_window_of_the_last_predictions():
     tracker = DriftTracker(
-        reference={"lights": {"deciles": [0.0, 10.0, 20.0], "mean": 10.0}},
+        reference={
+            "lights": {"bin_edges": [0.0, 10.0, 20.0], "bin_shares": [0.25] * 4}
+        },
         window_size=3,
         reset_every=2,
     )
 
-    tracker.configure({"lights": {"deciles": [0.0, 10.0, 20.0], "mean": 10.0}})
+    tracker.configure(
+        {"lights": {"bin_edges": [0.0, 10.0, 20.0], "bin_shares": [0.25] * 4}}
+    )
 
     for value in (1.0, 2.0, 3.0, 4.0, 5.0):
         tracker.observe({"lights": value})
@@ -116,7 +122,7 @@ def test_drift_tracker_keeps_a_window_of_the_last_predictions():
     assert len(tracker.current()) == 1
 
 
-def test_load_drift_profile_feeds_the_tracker_with_real_training_profile(monkeypatch):
+def test_load_drift_reference_feeds_the_tracker_with_real_training_profile(monkeypatch):
     import pandas as pd
 
     from app import main
@@ -128,22 +134,11 @@ def test_load_drift_profile_feeds_the_tracker_with_real_training_profile(monkeyp
     monkeypatch.setattr(main, "drift_tracker", tracker)
     monkeypatch.setattr(main.holder, "state", (object(), {"resolved_version": "1"}))
     monkeypatch.setattr(main.holder, "training_profile", lambda: profile)
+    monkeypatch.setattr(main, "_drift_version", None)
 
-    main._load_drift_profile()
+    main._load_drift_reference()
 
     assert tracker.enabled
     tracker.observe({"a": 1.0, "b": 1.0})
     assert set(tracker._buffers) == {"a", "b"}
     assert all(len(buf) == 1 for buf in tracker._buffers.values())
-
-
-def test_load_drift_profile_is_a_no_op_without_a_loaded_champion(monkeypatch):
-    from app import main
-
-    tracker = DriftTracker()
-    monkeypatch.setattr(main, "drift_tracker", tracker)
-    monkeypatch.setattr(main.holder, "state", None)
-
-    main._load_drift_profile()
-
-    assert not tracker.enabled

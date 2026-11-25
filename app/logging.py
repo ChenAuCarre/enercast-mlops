@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
@@ -77,7 +78,7 @@ def configure_logging() -> None:
     logger = logging.getLogger("app")
     logger.setLevel(getattr(logging, config.LOG_LEVEL, logging.INFO))
     if not logger.handlers:
-        handler = logging.StreamHandler()
+        handler = logging.StreamHandler(sys.stdout)
         handler.setFormatter(JsonFormatter())
         logger.addHandler(handler)
         logger.propagate = False

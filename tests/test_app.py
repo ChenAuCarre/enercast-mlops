@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from prometheus_client import REGISTRY
 
 from app import config, main, model
+from app.drift import PSI_FLOOR, DriftTracker
 
 PAYLOAD = {
     "date": "2016-05-15 19:30:00",
@@ -30,8 +31,10 @@ class FakeModel:
 @pytest.fixture
 def client(monkeypatch):
     """Factory: client(loaded=True) -> TestClient; all patches undone per test."""
-    # No background profile download (real MLflow) racing the next test's tracker.
-    monkeypatch.setattr(main, "_load_drift_profile_async", lambda: None)
+    # No real MLflow download; a fresh drift state per test.
+    monkeypatch.setattr(main.holder, "training_profile", lambda: None)
+    monkeypatch.setattr(main, "drift_tracker", DriftTracker())
+    monkeypatch.setattr(main, "_drift_version", None)
 
     def make(loaded=True):
         info = {"model_name": "m", "alias": "champion", "resolved_version": "2"}
@@ -222,16 +225,31 @@ def test_predict_updates_the_feature_drift_gauge(client, monkeypatch):
         },
     )
 
-    # Load synchronously: stale background threads from earlier tests race otherwise.
-    monkeypatch.setattr(main, "_load_drift_profile_async", main._load_drift_profile)
-
     with client() as c:
         for _ in range(100):
             assert c.post("/predict", json=PAYLOAD).status_code == 200
 
+    # lights=20 puts every sample in the upper bin: observed shares (floor, 1).
+    expected = (PSI_FLOOR - 0.5) * math.log(PSI_FLOOR / 0.5) + 0.5 * math.log(2)
     value = REGISTRY.get_sample_value("feature_drift", {"feature": "lights"})
-    assert value is not None
-    assert math.isfinite(value)
+    assert value == pytest.approx(expected)
+
+
+def test_drift_reference_loads_once_per_champion_and_again_after_refresh(
+    client, monkeypatch
+):
+    monkeypatch.setattr(config, "REFRESH_API_TOKEN", "tok")
+    calls = []
+    monkeypatch.setattr(main.holder, "training_profile", lambda: calls.append(1))
+
+    with client() as c:
+        c.post("/predict", json=PAYLOAD)
+        c.post("/predict", json=PAYLOAD)
+        assert len(calls) == 1  # a failed download is not retried per request
+        c.post("/refresh", headers={"X-Refresh-Token": "tok"})
+        c.post("/predict", json=PAYLOAD)
+
+    assert len(calls) == 2
 
 
 def test_unhandled_exception_is_counted_as_a_500(client, monkeypatch):

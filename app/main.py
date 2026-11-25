@@ -23,41 +23,40 @@ holder = ChampionHolder()
 drift_tracker = DriftTracker()
 
 
-def _configure_drift(reference):
+# Guards the drift reference, the tracker and the feature_drift gauges together.
+_drift_lock = threading.Lock()
+_drift_version = None  # champion version the drift reference was loaded for
+# A 3.5-day window never holds all 7 weekdays: this feature would always drift.
+DRIFT_IGNORED_FEATURES = {"day_of_week"}
+
+
+def _reset_drift(version=None, reference=None):
+    global _drift_version
+    _drift_version = version
     drift_tracker.configure(reference)
     metrics.clear_feature_drift()  # no stale gauge values from the old reference
 
 
-# A short MLflow outage at startup must not leave drift off until a /refresh.
-PROFILE_RETRY_DELAYS_SECONDS = (10, 30, 60)
-
-
-def _load_drift_profile():
-    # Network fetch that can be slow or retry: never run it on the startup path.
+def _load_drift_reference():
+    # Called once per champion version (under _drift_lock); a failed download
+    # leaves drift off until the next /refresh.
     version = holder.version
-    if version is None:
-        return  # nothing loaded: no champion to compare against
     profile = holder.training_profile()
-    for delay in PROFILE_RETRY_DELAYS_SECONDS:
-        if profile is not None or holder.version != version:
-            break
-        time.sleep(delay)
-        profile = holder.training_profile()
     if profile and profile.get("schema_version") != 2:
         profile = None  # older profiles have no bin shares: PSI would be wrong
-    if holder.version != version:
-        return  # a refresh moved the champion meanwhile; its own load will configure
     # the artifact nests per-feature stats under "features"
-    _configure_drift((profile or {}).get("features"))
+    features = (profile or {}).get("features") or {}
+    reference = {
+        name: stats
+        for name, stats in features.items()
+        if name not in DRIFT_IGNORED_FEATURES
+    }
+    _reset_drift(version, reference)
     log.log(
-        logging.INFO,
-        "drift_profile_loaded" if profile else "drift_profile_missing",
-        extra={"model_version": str(holder.version) if holder.version else None},
+        logging.INFO if reference else logging.WARNING,
+        "drift_profile_loaded" if reference else "drift_profile_missing",
+        extra={"model_version": version},
     )
-
-
-def _load_drift_profile_async():
-    threading.Thread(target=_load_drift_profile, daemon=True).start()
 
 
 @asynccontextmanager
@@ -81,8 +80,6 @@ async def lifespan(_):
             extra={"model_version": str(holder.version) if holder.version else None},
             exc_info=True,
         )
-
-    _load_drift_profile_async()
 
     yield
 
@@ -178,9 +175,13 @@ def predict(req: PredictRequest):
 
     try:  # monitoring must never fail a prediction
         metrics.observe_prediction(str(info["resolved_version"]), y)
-        drift_tracker.observe({name: float(X.iloc[0][name]) for name in X.columns})
-        for name, value in drift_tracker.current().items():
-            metrics.set_feature_drift(name, value)
+        with _drift_lock:
+            version = info["resolved_version"]
+            if version != _drift_version and version == holder.version:
+                _load_drift_reference()
+            drift_tracker.observe({name: float(X.iloc[0][name]) for name in X.columns})
+            for name, value in drift_tracker.current().items():
+                metrics.set_feature_drift(name, value)
     except Exception:
         log.exception("monitoring_update_failed")
 
@@ -218,8 +219,8 @@ def refresh(x_refresh_token: str = Header(default="")):
         raise HTTPException(502, "Refresh failed; see server logs") from exc
 
     metrics.set_model_info(holder.version)
-    _configure_drift(None)  # old reference no longer matches the new model
-    _load_drift_profile_async()
+    with _drift_lock:
+        _reset_drift()  # the next /predict loads the new champion's reference
 
     log.log(
         logging.INFO,
