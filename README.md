@@ -43,6 +43,7 @@ flowchart TB
 * **Data Versioning**: DVC with DagsHub Storage remote
 * **Experiment Tracking & Model Registry**: MLflow on DagsHub
 * **Containerization & Hosting**: Slim Docker image (`python:3.12-slim`) published to GHCR and deployed on Render
+* **Monitoring**: JSON logs, Prometheus metrics, PSI data drift, Grafana dashboard and alerts (local `docker compose`)
 * **Automation**: GitHub Actions for PR validation, staging verification, production deployment, continuous training, and model rollback
 
 ---
@@ -103,9 +104,11 @@ enercast-mlops/
 ├── data/                    # DVC-tracked dataset pointers (.dvc)
 ├── docs/                    # API reference and deployment/operations runbook
 ├── ml/                      # Preprocessing, splits, training, policy, registry, ML docs
+├── monitoring/              # Prometheus config, Grafana dashboard and alert rules
 ├── notebooks/               # Exploratory data analysis
-├── scripts/                 # Smoke-test script (local and CI/CD)
+├── scripts/                 # Smoke-test script (local and CI/CD), CSV replay for monitoring
 ├── tests/                   # Pytest unit and integration test suite
+├── docker-compose.yml       # Local API + Prometheus + Grafana stack
 ├── Dockerfile               # Slim production container image
 ├── pyproject.toml           # Project metadata and dependency groups
 ├── uv.lock                  # Locked dependency versions

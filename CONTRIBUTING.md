@@ -70,6 +70,7 @@ uv run pytest
 Unit tests mock the MLflow registry and use fake models, so `uv run pytest` runs offline without touching the shared registry. Add or update tests alongside your changes:
 
 * `tests/test_app.py` — API endpoints, validation errors, startup degradation, and atomic `/refresh` behavior
+* `tests/test_drift.py` — PSI, the training distribution, and the drift monitor
 * `tests/test_preprocess.py` and `tests/test_splits.py` — feature engineering and chronological splitting
 * `tests/test_train.py` and `tests/test_pipeline.py` — training runs, DVC hash checks, and pipeline orchestration
 * `tests/test_policy.py`, `tests/test_policy_candidate.py`, and `tests/test_registry.py` — promotion gates, write guards, and rollback rules
@@ -90,6 +91,10 @@ scripts/smoke_test.sh http://localhost:8000
 ```
 
 Once running, the web UI is available at <http://localhost:8000/> and the interactive Swagger UI at <http://localhost:8000/docs>. See [`docs/API.md`](docs/API.md) for endpoint contracts and sample payloads.
+
+### Run the Monitoring Stack
+
+`docker compose up --build` starts the API, Prometheus (<http://localhost:9090>) and Grafana (<http://localhost:3000>). Replay test rows with `uv run python scripts/replay.py data/versions/test/final_test.csv` to fill the dashboard. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#monitoring).
 
 ---
 

@@ -25,6 +25,11 @@ On startup, the service queries the MLflow Model Registry, resolves `wattwise-en
 | `GET` | `/model-info` | Public | Returns registry metadata for the currently loaded model version. |
 | `POST` | `/predict` | Public | Predicts household appliance energy consumption (`Wh`) for one 10-minute observation. |
 | `POST` | `/refresh` | `X-Refresh-Token` | Reloads `@champion` from MLflow without restarting the container. |
+| `GET` | `/metrics` | Public | Prometheus metrics: request count and latency, predictions per model version, served model version, drift per feature (excluded from OpenAPI schema). |
+
+### Request ID
+
+Every response carries an `X-Request-ID` header. Send your own `X-Request-ID` to correlate a call with the service's JSON logs; otherwise the service generates one. Every log line written while handling the request includes it as `request_id`.
 
 ---
 

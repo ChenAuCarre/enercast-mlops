@@ -18,7 +18,32 @@ All runtime settings are injected as environment variables; nothing is hard-code
 | `MLFLOW_TRACKING_USERNAME` | Yes | DagsHub username |
 | `MLFLOW_TRACKING_PASSWORD` | Yes | DagsHub personal access token |
 | `REFRESH_API_TOKEN` | Yes (for live reloads); optional for local runs | Shared secret for `POST /refresh`; must match the GitHub Actions secret. Leaving it unset disables `/refresh` (`401`). |
+| `LOG_LEVEL` | No | Log level for the JSON logs on stdout, including uvicorn's (defaults to `INFO`) |
 | `PORT` | Injected by Render; optional locally | Listen port inside the container (defaults to `8000`) |
+
+---
+
+## Monitoring
+
+The service writes one JSON object per line to stdout and exposes Prometheus metrics on `GET /metrics` (public). Drift is the PSI of the last 500 predictions' features against the champion's training distribution, recomputed every 100 predictions; a PSI above 0.20 logs a warning. A champion trained before `training_distribution.json` was logged has no reference, so drift stays disabled for it.
+
+To run the API with a local dashboard, put the variables above in `.env` and start the stack:
+
+```bash
+docker compose up --build
+```
+
+| Service | URL | Notes |
+| :--- | :--- | :--- |
+| API | <http://localhost:8000> | Same image as production |
+| Prometheus | <http://localhost:9090> | Scrapes `/metrics` every 5 s |
+| Grafana | <http://localhost:3000> | Provisioned dashboard and alert rules (API down, 5xx share above 5 %, max PSI above 0.20); default login `admin` / `admin`. No contact point is configured, so alerts are visible in Grafana only. |
+
+Generate traffic for the dashboard and alerts by replaying CSV rows against `/predict`:
+
+```bash
+uv run python scripts/replay.py data/versions/test/final_test.csv
+```
 
 ---
 
