@@ -1,75 +1,64 @@
 # Contributing to `enercast-mlops`
 
-This repo is a production MLOps reference, and PR history tracks each contributor's work. All changes must follow the branching, testing, and data/model hygiene rules below.
+Thank you for contributing to `enercast-mlops`. This guide covers local environment setup, testing, Docker verification, the Git branching workflow, and ML hygiene standards.
 
 ---
 
 ## 1. Local Development Setup
 
 ### Prerequisites
-* [uv](https://docs.astral.sh/uv/) (manages Python and dependencies)
-* Docker (for local container smoke testing)
-* Access to the team's DagsHub project (MLflow server and DVC remote)
 
-### Installation
+* [uv](https://docs.astral.sh/uv/) (manages the pinned Python 3.12 runtime and dependencies)
+* Docker (required for local container builds and smoke testing)
+* Access to the project's DagsHub repository (required to pull DVC datasets or connect to the shared MLflow server)
+
+### Install Dependencies
+
+Clone the repository and synchronize the virtual environment:
 
 ```bash
 git clone https://github.com/ChenAuCarre/enercast-mlops.git
 cd enercast-mlops
-uv sync  # installs the pinned Python version and all dependencies into .venv
+uv sync
 ```
 
-Install only what a task needs:
+`pyproject.toml` configures `default-groups = ["dev", "experiment"]`, so `uv sync` installs runtime, development, and experimentation dependencies into `.venv`. To install a narrower set for a specific task:
 
 ```bash
-uv sync --no-group experiment                  # tests and linting, as in CI
-uv sync --no-dev --no-group experiment         # runtime only, as in the Docker image
+uv sync --no-group experiment              # runtime + tests and linting (matches CI test job)
+uv sync --no-dev --no-group experiment     # runtime only (matches the Docker image)
 ```
 
-Add dependencies to the right group and commit the updated `pyproject.toml` and `uv.lock`:
-* `uv add <pkg>`: runtime, shipped in the Docker image
-* `uv add --dev <pkg>`: tests and linting
-* `uv add --group experiment <pkg>`: notebooks and training
+When adding a new dependency, place it in the appropriate group and commit both `pyproject.toml` and `uv.lock`:
+
+* `uv add <pkg>` — runtime dependencies shipped in the production Docker image
+* `uv add --dev <pkg>` — test and linting tools
+* `uv add --group experiment <pkg>` — notebooks, DVC, and training dependencies
 
 ### Environment Variables & Secrets
 
-Put the variables listed in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#run-locally-with-docker) in a git-ignored `.env`. `MLFLOW_TRACKING_PASSWORD` is your DagsHub token, also used as the DVC remote password.
+For local runs, create a git-ignored `.env` at the repository root with the variables listed in [Runtime Configuration](docs/DEPLOYMENT.md#runtime-configuration-render). `MLFLOW_TRACKING_PASSWORD` is your DagsHub token, also used as the DVC remote password.
 
-**Never expose secrets** in commits, logs, notebook outputs, screenshots, issues, or PR descriptions. If a secret leaks, rotate it immediately.
+> **Security rule:** Never commit or paste credentials into Git commits, notebook outputs, logs, screenshots, issues, or pull requests. `.env` and `.dvc/config.local` are git-ignored. If a token is ever exposed, rotate it immediately.
 
 ### DVC Remote
 
-Datasets are versioned with DVC and stored on DagsHub. To download them, store DagsHub credentials in the gitignored `.dvc/config.local` (never in the committed `.dvc/config`), then pull:
+Datasets are tracked with DVC and stored on DagsHub. Store your DagsHub credentials locally in `.dvc/config.local` (never edit the committed `.dvc/config`), then pull the tracked snapshots:
 
 ```bash
 uv run dvc remote modify origin --local auth basic
 uv run dvc remote modify origin --local user <dagshub-username>
 uv run dvc remote modify origin --local password <dagshub-token>
-uv run dvc pull  # fetches the tracked datasets
+uv run dvc pull
 ```
 
 ---
 
-## 2. Git Branching & Pull Request Workflow
+## 2. Local Checks & Docker Verification
 
-Three long-lived branches, promoted in order:
+### Linting and Tests
 
-```text
-<type>/<topic> ──PR──► dev ──PR──► staging ──PR──► main
-```
-
-1. **Branch off `dev`** with a short-lived branch named per [Conventional Branch](https://conventional-branch.github.io/) (`feature/*`, `feat/*`, `fix/*`, `docs/*`, `ci/*`, ...).
-2. **Write commits and PR titles** per [Conventional Commits](https://www.conventionalcommits.org/) (the PR title is checked in CI).
-3. **Open PRs against `dev`**. Keep them small and focused.
-4. **Promote releases** with a PR from `dev` to `staging`, then from `staging` to `main`. Any other source branch is rejected. Merging to `staging` validates the release candidate; merging to `main` deploys it (see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#workflows-and-the-branches-that-trigger-them)).
-
-Repository rulesets protect `dev`, `staging` and `main`: changes go through a pull request, force-push and deletion are blocked, and the `ci-pass` check must pass. `dev` takes squash merges only (no approval required); `staging` and `main` take merge commits only, with one approval and the `check-source` check.
-
----
-
-## 3. Code Quality, Testing & Docker Verification
-
-Before opening a PR, run the checks enforced by `.github/workflows/ci-pr.yml`:
+Run the same checks enforced by `.github/workflows/ci-pr.yml` before opening a pull request:
 
 ```bash
 uv lock --check
@@ -78,15 +67,68 @@ uv run ruff format --check .
 uv run pytest
 ```
 
-Tests use fake models and a mocked MLflow registry, so they never touch production models. Add tests next to the code you change: `tests/test_app.py` for the API (predictions, invalid inputs, model loading and refresh), `tests/test_policy*.py` and `tests/test_registry.py` for promotion and rollback rules.
+Unit tests mock the MLflow registry and use fake models, so `uv run pytest` runs offline without touching the shared registry. Add or update tests alongside your changes:
 
-To check the image, build and smoke-test it locally as described in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#run-locally-with-docker).
+* `tests/test_app.py` — API endpoints, validation errors, startup degradation, and atomic `/refresh` behavior
+* `tests/test_preprocess.py` and `tests/test_splits.py` — feature engineering and chronological splitting
+* `tests/test_train.py` and `tests/test_pipeline.py` — training runs, DVC hash checks, and pipeline orchestration
+* `tests/test_policy.py`, `tests/test_policy_candidate.py`, and `tests/test_registry.py` — promotion gates, write guards, and rollback rules
+
+### Build and Smoke-Test the Docker Image
+
+Verify that the production container builds, loads `@champion`, and serves predictions locally:
+
+```bash
+docker build -t enercast-api:local .
+docker run --rm -p 8000:8000 --env-file .env enercast-api:local
+```
+
+In a second terminal, verify readiness, metadata, and inference:
+
+```bash
+scripts/smoke_test.sh http://localhost:8000
+```
+
+Once running, the web UI is available at <http://localhost:8000/> and the interactive Swagger UI at <http://localhost:8000/docs>. See [`docs/API.md`](docs/API.md) for endpoint contracts and sample payloads.
+
+---
+
+## 3. Git Branching & Pull Request Workflow
+
+Changes promote sequentially through three long-lived branches:
+
+```text
+<type>/<topic> ──PR──► dev ──PR──► staging ──PR──► main
+```
+
+1. **Branch from `dev`** using a short-lived branch named according to [Conventional Branch](https://conventional-branch.github.io/) (for example, `feat/*`, `feature/*`, `fix/*`, `docs/*`, `ci/*`).
+2. **Follow [Conventional Commits](https://www.conventionalcommits.org/)** for commit messages and PR titles. The `pr-title` job in `ci-pr.yml` rejects non-conforming PR titles.
+3. **Open feature PRs against `dev`**. Keep each PR small, focused, and easy to review.
+4. **Promote releases in order**: open a PR from `dev` to `staging` to validate and publish the release-candidate image, then open a PR from `staging` to `main` to deploy that verified image to production. Any other source branch into `staging` or `main` is rejected by `enforce-source-branch.yml`.
+
+### Branch Protection Rules
+
+Repository rulesets protect `dev`, `staging`, and `main`. Force-pushes and branch deletions are disabled on all three branches, and every merge requires a pull request with:
+
+* **1 approving review** (stale approvals are dismissed on new pushes)
+* **All review threads resolved**
+* **Passing `ci-pass` check**
+
+Additional branch-specific rules:
+
+| Target Branch | Allowed Merge Method | Extra Required Checks | Automated Action on Merge |
+| :--- | :--- | :--- | :--- |
+| `dev` | Squash merge only | — | None |
+| `staging` | Merge commit only | `check-source` (`dev` → `staging`) | Runs `cd-staging.yml` (validates and pushes image to GHCR) |
+| `main` | Merge commit only | `check-source` (`staging` → `main`) | Runs `cd-prod.yml` (deploys verified digest to Render) |
+
+See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the full CI/CD pipeline specification.
 
 ---
 
 ## 4. Data & Model Hygiene Rules
 
-* **No datasets or model binaries in Git**: track data with DVC (`dvc add` → `dvc push`) and commit only the `.dvc` pointer files.
-* **Preserve chronological splits**: data preparation must keep `max(train.date) < min(eval.date)` and fit preprocessing on the training split only.
-* **Never edit the production `@champion` alias by hand**: promotions and rollbacks go through `ct-retrain.yml` or `rollback.yml` so they are logged in MLflow.
-* **Never write to the shared registry from a laptop**: `register_model`, `promote_model` and `rollback_champion` refuse to run unless `GITHUB_ACTIONS=true`. For local experiments, set `MLFLOW_TRACKING_URI=file:./mlruns`; use `ml/train.py` or a separate experiment, never the shared registry.
+* **Never commit raw datasets or model binaries to Git.** Track data files with DVC (`dvc add` → `dvc push`) and commit only the `.dvc` pointer files.
+* **Preserve chronological splits.** Never shuffle time-series rows, always keep `max(train.date) < min(validation.date)`, keep `final_test.csv` isolated from model selection, and fit any stateful preprocessing exclusively on the training split. See [`ml/README_data.md`](ml/README_data.md) for the data contract.
+* **Never edit the `@champion` alias manually.** All promotions and rollbacks must run through `ct-retrain.yml` or `rollback.yml` so MLflow records the policy decision and audit trail.
+* **Never write to the shared registry from a local machine.** `register_model`, `promote_model`, and `rollback_champion` raise `LocalRegistryWriteForbidden` unless `GITHUB_ACTIONS=true`. For local experimentation, point MLflow to a local store (`export MLFLOW_TRACKING_URI="file:./mlruns"`) and run `uv run python -m ml.train`. See [`ml/README_experiments.md`](ml/README_experiments.md) for details.

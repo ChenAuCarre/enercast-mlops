@@ -1,9 +1,18 @@
-# API Reference (`enercast-mlops`)
+# API Reference
 
-The inference service exposes a RESTful JSON API built with FastAPI. Upon startup (or when `/refresh` is invoked), the service queries the MLflow Model Registry, resolves the `@champion` alias to a concrete version number, and loads the corresponding model artifact into memory. If the load fails at startup the service still starts: `/health` returns `503` and `/model-info` / `/predict` return `503` until a `/refresh` succeeds.
+The `enercast-mlops` inference service is a FastAPI application serving both a RESTful JSON API and a static web UI.
 
-* **Base URL**: `https://enercast-mlops-tree.onrender.com`
-* **OpenAPI / Swagger UI**: `https://enercast-mlops-tree.onrender.com/docs`
+* **Production Base URL**: `https://enercast-mlops-tree.onrender.com`
+* **Interactive Swagger UI**: `https://enercast-mlops-tree.onrender.com/docs`
+
+---
+
+## Runtime Model Lifecycle
+
+On startup, the service queries the MLflow Model Registry, resolves `wattwise-energy-forecaster@champion` to a concrete version, and loads that model artifact into memory:
+
+* **Startup failure resilience:** If the initial load fails, the process still starts so orchestrators can inspect `/health`, which returns `503 Service Unavailable`. `/model-info` and `/predict` also return `503` until a `POST /refresh` succeeds or the service restarts with a reachable champion.
+* **Zero-downtime reloads:** `POST /refresh` loads the newly resolved `@champion` model and swaps the model and metadata atomically. If a reload fails, the service returns `502 Bad Gateway` and continues serving the previously loaded model.
 
 ---
 
@@ -11,20 +20,22 @@ The inference service exposes a RESTful JSON API built with FastAPI. Upon startu
 
 | Method | Path | Auth | Purpose |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/health` | Public | Readiness probe; reports `200` only when the `@champion` model is loaded and operational. |
-| `GET` | `/model-info` | Public | Returns the resolved MLflow model name, alias, concrete version, and run metadata. |
-| `POST` | `/predict` | Public | Predicts appliance energy consumption (`Wh`) for a single 10-minute observation. |
-| `POST` | `/refresh` | `X-Refresh-Token` header | Reloads the active `@champion` model from MLflow without container restart. |
+| `GET` | `/` | Public | Serves the interactive browser web UI (excluded from OpenAPI schema). |
+| `GET` | `/health` | Public | Readiness probe; returns `200` only when a `@champion` model is loaded. |
+| `GET` | `/model-info` | Public | Returns registry metadata for the currently loaded model version. |
+| `POST` | `/predict` | Public | Predicts household appliance energy consumption (`Wh`) for one 10-minute observation. |
+| `POST` | `/refresh` | `X-Refresh-Token` | Reloads `@champion` from MLflow without restarting the container. |
 
 ---
 
 ## 1. Readiness Probe: `GET /health`
 
-Used by container orchestrators and CI/CD smoke tests to verify that the service has successfully downloaded and initialized the approved `@champion` model.
+Used by container orchestrators and CI/CD smoke tests to confirm that the service has initialized a champion model.
 
 ### Responses
 
 * **`200 OK` (Ready)**
+
   ```json
   {
     "status": "ready",
@@ -33,7 +44,8 @@ Used by container orchestrators and CI/CD smoke tests to verify that the service
   }
   ```
 
-* **`503 Service Unavailable` (Not Ready / Model Load Failure)**
+* **`503 Service Unavailable` (Not Ready)**
+
   ```json
   {
     "status": "unavailable",
@@ -46,47 +58,55 @@ Used by container orchestrators and CI/CD smoke tests to verify that the service
 
 ## 2. Active Model Metadata: `GET /model-info`
 
-Exposes full traceability of the currently loaded production model.
+Returns traceability metadata for the loaded `@champion` model. `dataset_version` is `null` if the originating MLflow run did not log that parameter.
 
-### Response (`200 OK`)
+### Responses
 
-```json
-{
-  "model_name": "wattwise-energy-forecaster",
-  "alias": "champion",
-  "resolved_version": "2",
-  "mlflow_run_id": "a1b2c3d4e5f67890",
-  "dataset_version": "v2",
-  "loaded_at_utc": "2026-11-21T14:30:00+00:00"
-}
-```
+* **`200 OK`**
 
-Returns `503` (`{"detail": "Champion model not loaded"}`) if no model is loaded.
+  ```json
+  {
+    "model_name": "wattwise-energy-forecaster",
+    "alias": "champion",
+    "resolved_version": "2",
+    "mlflow_run_id": "a1b2c3d4e5f67890",
+    "dataset_version": "v2",
+    "loaded_at_utc": "2026-11-21T14:30:00+00:00"
+  }
+  ```
+
+* **`503 Service Unavailable`** — returned when no model is loaded:
+
+  ```json
+  {
+    "detail": "Champion model not loaded"
+  }
+  ```
 
 ---
 
 ## 3. Energy Consumption Inference: `POST /predict`
 
-Predicts total household appliance energy consumption (`Appliances`, in Watt-hours `Wh`) from timestamp, lighting usage, indoor multi-zone temperatures/humidity, and local weather station readings.
+Predicts total household appliance energy consumption (`Appliances`, in `Wh`, rounded to 2 decimal places) from an observation timestamp, lighting energy use, nine building sensor zones, and outdoor weather readings.
 
-### Request Schema & Physical Validation Rules
+### Request Schema & Validation Rules
 
-All fields are required. Requests violating physical sensor boundaries or formatting rules are rejected with `422 Unprocessable Entity`.
+All 26 fields are required. Requests with missing fields, invalid timestamps, or out-of-range sensor values are rejected with `422 Unprocessable Entity` (enforced in `app/schemas.py`).
 
-| Field | Type | Unit | Constraints | Description |
+| Field | Type | Unit | Validation Rule | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `date` | `string` | ISO / Timestamp | Valid `YYYY-MM-DD HH:MM:SS` | Observation timestamp (used to derive `hour` and `day_of_week`). |
-| `lights` | `float` | `Wh` | `>= 0` | Energy use of light fixtures in the house. |
-| `T1` – `T9` | `float` | `°C` | `-20.0 <= T <= 60.0` | Indoor temperatures across 9 house zones (kitchen, living, laundry, office, etc.). |
-| `RH_1` – `RH_9` | `float` | `%` | `0.0 <= RH <= 100.0` | Indoor relative humidity across 9 house zones. |
-| `To` | `float` | `°C` | `-40.0 <= To <= 60.0` | Outdoor temperature from Chievres weather station. |
-| `Pressure` | `float` | `mm Hg` | `650.0 <= P <= 850.0` | Atmospheric pressure. |
+| `date` | `string` | Timestamp | Strict `YYYY-MM-DD HH:MM:SS` | Observation timestamp used to derive `hour` and `day_of_week`. ISO-8601 strings with `T` or timezone offsets are rejected. |
+| `lights` | `float` | `Wh` | `>= 0.0` | Energy use of household light fixtures. |
+| `T1` – `T9` | `float` | `°C` | `-20.0 <= T <= 60.0` | Temperatures across 9 house sensor zones. |
+| `RH_1` – `RH_9` | `float` | `%` | `0.0 <= RH <= 100.0` | Relative humidity across the same 9 sensor zones. |
+| `To` | `float` | `°C` | `-40.0 <= To <= 60.0` | Outdoor temperature from the Chièvres weather station. |
+| `Pressure` | `float` | `mm Hg` | `650.0 <= Pressure <= 850.0` | Atmospheric pressure. |
 | `RH_out` | `float` | `%` | `0.0 <= RH_out <= 100.0` | Outdoor relative humidity. |
 | `Windspeed` | `float` | `m/s` | `>= 0.0` | Wind speed. |
 | `Visibility` | `float` | `km` | `>= 0.0` | Horizontal visibility. |
-| `Tdewpoint` | `float` | `°C` | `-50.0 <= Td <= 50.0` | Dew point temperature. |
+| `Tdewpoint` | `float` | `°C` | `-50.0 <= Tdewpoint <= 50.0` | Dew point temperature. |
 
-*(Note: Random noise variables `rv1` and `rv2` from the raw UCI dataset are excluded from the production inference schema.)*
+> The random noise columns `rv1` and `rv2` present in the raw UCI dataset are intentionally excluded from the inference schema.
 
 ### Example Request
 
@@ -122,8 +142,15 @@ All fields are required. Requests violating physical sensor boundaries or format
 
 ### Error Responses
 
-* **`503 Service Unavailable`**: no model loaded (`{"detail": "Champion model not loaded"}`).
-* **`422 Unprocessable Entity`**: inputs are malformed or physically out-of-range (e.g., `lights < 0` or `RH_1 > 100`):
+* **`503 Service Unavailable`** — no model is currently loaded:
+
+  ```json
+  {
+    "detail": "Champion model not loaded"
+  }
+  ```
+
+* **`422 Unprocessable Entity`** — malformed input or sensor value outside physical bounds (for example, `RH_1 > 100`):
 
   ```json
   {
@@ -139,31 +166,44 @@ All fields are required. Requests violating physical sensor boundaries or format
   }
   ```
 
-  A bad `date` fails with `type: "value_error"`, `loc: ["body", "date"]` and a message such as `Value error, time data 'x' does not match format '%Y-%m-%d %H:%M:%S'`.
+  An invalid `date` value returns `type: "value_error"` at `loc: ["body", "date"]` with a message such as `Value error, time data 'x' does not match format '%Y-%m-%d %H:%M:%S'`.
 
 ---
 
 ## 4. Reload Champion Model: `POST /refresh`
 
-Triggered automatically by `ct-retrain.yml` or `rollback.yml` after the `@champion` alias is updated in MLflow.
+Instructs the running service to re-resolve `wattwise-energy-forecaster@champion` in MLflow and load the updated version into memory. Called automatically by `ct-retrain.yml` and `rollback.yml` after the alias moves.
 
-### Headers
+### Authentication Header
 
 * `X-Refresh-Token: <REFRESH_API_TOKEN>`
 
-> If `REFRESH_API_TOKEN` is unset, `/refresh` is disabled (always `401`) but the rest of the API still works. If the champion model fails to load at startup, `/health` returns `503` until a successful `/refresh` (needs the token) or a restart.
+If the `REFRESH_API_TOKEN` environment variable is unset or empty on the server, `/refresh` is disabled and always returns `401 Unauthorized`; all other endpoints continue operating normally.
 
-### Response (`200 OK`)
+### Responses
 
-```json
-{
-  "status": "refreshed",
-  "previous_version": "1",
-  "current_version": "2"
-}
-```
+* **`200 OK`** (`previous_version` is `null` if no model was loaded before the refresh)
 
-### Error Responses
+  ```json
+  {
+    "status": "refreshed",
+    "previous_version": "1",
+    "current_version": "2"
+  }
+  ```
 
-* **`401 Unauthorized`**: missing/wrong token, or `REFRESH_API_TOKEN` unset (`{"detail": "Invalid refresh token"}`).
-* **`502 Bad Gateway`**: the reload failed; the previously loaded model keeps serving (`{"detail": "Refresh failed; see server logs"}`).
+* **`401 Unauthorized`** — missing or mismatched `X-Refresh-Token`, or `REFRESH_API_TOKEN` is unset:
+
+  ```json
+  {
+    "detail": "Invalid refresh token"
+  }
+  ```
+
+* **`502 Bad Gateway`** — reloading from MLflow failed; the previously loaded model remains active:
+
+  ```json
+  {
+    "detail": "Refresh failed; see server logs"
+  }
+  ```
