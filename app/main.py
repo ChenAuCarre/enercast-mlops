@@ -29,7 +29,15 @@ async def lifespan(_):
     try:
         holder.load()
     except Exception:  # start anyway; /health reports 503 until a refresh works
-        log.exception("Champion model failed to load at startup")
+        # Surface the failure through a structured event so that the container
+        # logs (and the CI smoke test `docker logs` dump) pinpoint the cause
+        # without parsing a free-form traceback message.
+        log.log(
+            logging.ERROR,
+            "champion_model_load_failed",
+            extra={"model_version": str(holder.version) if holder.version else None},
+            exc_info=True,
+        )
 
     drift_tracker.configure(holder.training_profile())
 

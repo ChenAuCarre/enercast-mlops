@@ -137,6 +137,36 @@ def test_refresh_non_ascii_token_is_401(client, monkeypatch):
     assert r.status_code == 401
 
 
+def test_health_503_when_the_champion_load_fails_at_startup(client, monkeypatch):
+    def boom():
+        raise RuntimeError("mlflow down")
+
+    events = []
+
+    class RecordingLog:
+        def log(self, level, event, extra=None, **kwargs):
+            events.append((level, event, extra))
+
+    monkeypatch.setattr(main, "log", RecordingLog())
+
+    c = client(loaded=False)
+    monkeypatch.setattr(main.holder, "load", boom)
+    with c:
+        assert c.get("/health").status_code == 503
+
+    assert any(event == "champion_model_load_failed" for _level, event, _e in events)
+
+
+def test_health_ready_when_the_drift_profile_is_absent(client, monkeypatch):
+    # The champion is loaded but the training profile artifact is missing:
+    # the drift monitoring is disabled and /health must still answer 200.
+    monkeypatch.setattr(main.holder, "training_profile", lambda: None)
+
+    with client() as c:
+        assert c.get("/health").status_code == 200
+        assert c.get("/metrics").status_code == 200
+
+
 def test_metrics_endpoint_returns_the_prometheus_payload(client):
     with client() as c:
         r = c.get("/metrics")
