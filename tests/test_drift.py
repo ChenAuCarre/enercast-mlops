@@ -81,23 +81,23 @@ def test_drift_tracker_is_disabled_without_a_reference():
     assert tracker.current() == {}
 
 
-def test_drift_tracker_recomputes_drift_every_reset_every_observations():
+def test_drift_tracker_recomputes_drift_once_the_window_is_full():
     tracker = DriftTracker(
         reference={
             "lights": {"bin_edges": [0.0, 10.0, 20.0], "bin_shares": [0.25] * 4}
         },
-        reset_every=100,
+        window_size=200,
+        recompute_every=100,
     )
 
     assert tracker.enabled is True
-    tracker.observe({"lights": 5.0})
+    for _ in range(199):  # observation 100 is on cadence but the window is not full
+        assert tracker.observe({"lights": 5.0}) is None
     assert tracker.current() == {}
 
-    for _ in range(99):
-        tracker.observe({"lights": 5.0})
-
-    tracker.observe({"lights": 5.0})  # 100th observation -> recompute
-    assert set(tracker.current()) == {"lights"}
+    drift = tracker.observe({"lights": 5.0})  # 200th observation -> recompute
+    assert set(drift) == {"lights"}
+    assert tracker.current() == drift
     assert math.isfinite(tracker.current()["lights"])
 
 
@@ -107,7 +107,7 @@ def test_drift_tracker_keeps_a_window_of_the_last_predictions():
             "lights": {"bin_edges": [0.0, 10.0, 20.0], "bin_shares": [0.25] * 4}
         },
         window_size=3,
-        reset_every=2,
+        recompute_every=2,
     )
 
     tracker.configure(
@@ -117,7 +117,7 @@ def test_drift_tracker_keeps_a_window_of_the_last_predictions():
     for value in (1.0, 2.0, 3.0, 4.0, 5.0):
         tracker.observe({"lights": value})
 
-    # reset_every=2 -> recomputes on observations 2 and 4, with a window of 3.
+    # recompute_every=2, window 3 -> recomputes on observation 4 only.
     assert set(tracker.current()) == {"lights"}
     assert len(tracker.current()) == 1
 

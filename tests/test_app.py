@@ -1,3 +1,6 @@
+import io
+import json
+import logging
 import math
 from types import SimpleNamespace
 
@@ -7,6 +10,7 @@ from prometheus_client import REGISTRY
 
 from app import config, main, model
 from app.drift import PSI_FLOOR, DriftTracker
+from app.logging import JsonFormatter
 
 PAYLOAD = {
     "date": "2016-05-15 19:30:00",
@@ -45,6 +49,18 @@ def client(monkeypatch):
         return TestClient(main.app)
 
     return make
+
+
+@pytest.fixture
+def json_lines():
+    """Real JSON log lines reaching the root handler, parsed: call after requests."""
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(JsonFormatter())
+    logger = logging.getLogger()  # configure_logging() clears the app logger's own
+    logger.addHandler(handler)
+    yield lambda: [json.loads(line) for line in stream.getvalue().splitlines()]
+    logger.removeHandler(handler)
 
 
 def test_predict_ok(client):
@@ -215,7 +231,10 @@ def test_predict_logs_structured_prediction_and_request_events(client, monkeypat
     assert extra["feature_count"] == 27
 
 
-def test_predict_updates_the_feature_drift_gauge(client, monkeypatch):
+def test_predict_updates_the_feature_drift_gauge_and_logs_drift(
+    client, monkeypatch, json_lines
+):
+    monkeypatch.setattr(main, "drift_tracker", DriftTracker(window_size=100))
     monkeypatch.setattr(
         main.holder,
         "training_profile",
@@ -233,6 +252,25 @@ def test_predict_updates_the_feature_drift_gauge(client, monkeypatch):
     expected = (PSI_FLOOR - 0.5) * math.log(PSI_FLOOR / 0.5) + 0.5 * math.log(2)
     value = REGISTRY.get_sample_value("feature_drift", {"feature": "lights"})
     assert value == pytest.approx(expected)
+    drift_events = [
+        line for line in json_lines() if line["event"] == "data_drift_detected"
+    ]
+    assert [event["features"] for event in drift_events] == [["lights"]]
+
+
+def test_predict_writes_json_lines_with_the_request_id(client, json_lines):
+    with client() as c:
+        c.post("/predict", json=PAYLOAD, headers={"X-Request-ID": "rid-42"})
+        long_id = c.post("/predict", json=PAYLOAD, headers={"X-Request-ID": "x" * 500})
+
+    events = {
+        line["event"]: line
+        for line in json_lines()
+        if line.get("request_id") == "rid-42"
+    }
+    assert events["prediction_made"]["model_version"] == "2"
+    assert "http_request" in events
+    assert long_id.headers["X-Request-ID"] == "x" * 64
 
 
 def test_drift_reference_loads_once_per_champion_and_again_after_refresh(
@@ -330,3 +368,9 @@ def test_predict_survives_a_monitoring_failure(client, monkeypatch):
         r = c.post("/predict", json=PAYLOAD)
 
     assert r.status_code == 200
+
+
+def test_predict_does_not_wait_for_a_busy_drift_lock(client):
+    # e.g. another request is stuck downloading the training profile
+    with main._drift_lock, client() as c:
+        assert c.post("/predict", json=PAYLOAD).status_code == 200

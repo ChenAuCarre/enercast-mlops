@@ -25,6 +25,7 @@ from app import config
 _RESERVED_LOG_RECORD_KEYS = frozenset(vars(logging.makeLogRecord({}))) | {
     "message",
     "asctime",
+    "color_message",  # uvicorn's ANSI-coloured duplicate of the message
 }
 
 _request_id_context: ContextVar[str] = ContextVar("app_request_id", default="")
@@ -73,15 +74,23 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 
+# Libraries that install their own plain-text handlers.
+# uvicorn.access is left alone so `--no-access-log` (Dockerfile) still silences it.
+JSON_ROUTED_LOGGERS = ("app", "uvicorn", "uvicorn.error", "mlflow")
+
+
 def configure_logging() -> None:
-    """Attach the JSON formatter to the app logger and set the level."""
-    logger = logging.getLogger("app")
-    logger.setLevel(getattr(logging, config.LOG_LEVEL, logging.INFO))
-    if not logger.handlers:
+    """Send app, uvicorn and mlflow logs to stdout as JSON lines."""
+    root = logging.getLogger()
+    if not any(isinstance(h.formatter, JsonFormatter) for h in root.handlers):
         handler = logging.StreamHandler(sys.stdout)
         handler.setFormatter(JsonFormatter())
-        logger.addHandler(handler)
-        logger.propagate = False
+        root.addHandler(handler)
+    for name in JSON_ROUTED_LOGGERS:
+        logger = logging.getLogger(name)
+        logger.handlers.clear()
+        logger.propagate = True
+    logging.getLogger("app").setLevel(getattr(logging, config.LOG_LEVEL, logging.INFO))
 
 
 def get_logger(name: str = "app") -> logging.Logger:

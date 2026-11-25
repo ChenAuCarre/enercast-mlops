@@ -81,3 +81,21 @@ def test_json_formatter_attaches_the_context_request_id():
 
     assert with_context["request_id"] == "rid-9"
     assert explicit["request_id"] == "other"
+
+
+def test_configure_logging_routes_uvicorn_and_mlflow_logs_through_json():
+    logging.getLogger("uvicorn").addHandler(logging.StreamHandler())
+    logging.getLogger("uvicorn").propagate = False
+
+    app_logging.configure_logging()
+    app_logging.configure_logging()  # idempotent
+
+    root_json = [
+        h
+        for h in logging.getLogger().handlers
+        if isinstance(h.formatter, app_logging.JsonFormatter)
+    ]
+    assert len(root_json) == 1
+    for name in app_logging.JSON_ROUTED_LOGGERS:
+        assert logging.getLogger(name).handlers == []
+        assert logging.getLogger(name).propagate

@@ -13,7 +13,7 @@ from prometheus_client import CONTENT_TYPE_LATEST
 
 from app import config, metrics
 from app import logging as app_logging
-from app.drift import DriftTracker
+from app.drift import DRIFT_THRESHOLD, DriftTracker
 from app.model import ChampionHolder
 from app.schemas import PredictRequest, PredictResponse, RefreshResponse
 from ml.preprocess import preprocess_features
@@ -59,6 +59,31 @@ def _load_drift_reference():
     )
 
 
+def _update_drift(version, X):
+    # Never wait: a slow profile download skips the drift sample of concurrent
+    # requests instead of stalling their predictions.
+    if not _drift_lock.acquire(blocking=False):
+        return
+    try:
+        if version != _drift_version and version == holder.version:
+            _load_drift_reference()
+        drift = drift_tracker.observe(
+            {name: float(X.iloc[0][name]) for name in X.columns}
+        )
+        if drift is None:
+            return
+        for name, value in drift.items():
+            metrics.set_feature_drift(name, value)
+        if drifted := sorted(name for name, v in drift.items() if v > DRIFT_THRESHOLD):
+            log.log(
+                logging.WARNING,
+                "data_drift_detected",
+                extra={"model_version": version, "features": drifted},
+            )
+    finally:
+        _drift_lock.release()
+
+
 @asynccontextmanager
 async def lifespan(_):
     app_logging.configure_logging()
@@ -92,7 +117,10 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 @app.middleware("http")
 async def request_logging(request: Request, call_next):
-    request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
+    # Capped: the id is echoed and logged, a client must not inflate every line.
+    request_id = (request.headers.get("X-Request-ID") or "")[:64] or uuid.uuid4().hex[
+        :12
+    ]
     token = app_logging.set_request_id(request_id)
     start = time.perf_counter()
     status = 500  # stays 500 if call_next raises, so crashes are still counted
@@ -175,13 +203,7 @@ def predict(req: PredictRequest):
 
     try:  # monitoring must never fail a prediction
         metrics.observe_prediction(str(info["resolved_version"]), y)
-        with _drift_lock:
-            version = info["resolved_version"]
-            if version != _drift_version and version == holder.version:
-                _load_drift_reference()
-            drift_tracker.observe({name: float(X.iloc[0][name]) for name in X.columns})
-            for name, value in drift_tracker.current().items():
-                metrics.set_feature_drift(name, value)
+        _update_drift(info["resolved_version"], X)
     except Exception:
         log.exception("monitoring_update_failed")
 

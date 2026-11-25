@@ -9,8 +9,9 @@ logged by the training run of the champion version (see ``ml.train``); the API
 downloads it on the first prediction of each champion version.
 
 The live distribution is the sliding window of the last predictions per
-feature. The drift is recomputed every ``DRIFT_WINDOW_RESET_EVERY`` predictions
-and compared to ``DRIFT_THRESHOLD`` by the alerting rules.
+feature. Once the window is full, the drift is recomputed every
+``DRIFT_RECOMPUTE_EVERY`` predictions; features above ``DRIFT_THRESHOLD`` are
+logged by the API and alerted on by Grafana.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ DRIFT_THRESHOLD = 0.20
 # against months of training data, so seasonal weather reads as drift; compare
 # against a same-season reference window if that becomes a real alert source.
 DRIFT_WINDOW_SIZE = 500
-DRIFT_WINDOW_RESET_EVERY = 100
+DRIFT_RECOMPUTE_EVERY = 100
 PSI_FLOOR = 1e-4  # empty bins would make log() infinite
 
 
@@ -91,11 +92,11 @@ class DriftTracker:
         self,
         reference: Mapping[str, Any] | None = None,
         window_size: int = DRIFT_WINDOW_SIZE,
-        reset_every: int = DRIFT_WINDOW_RESET_EVERY,
+        recompute_every: int = DRIFT_RECOMPUTE_EVERY,
     ) -> None:
         self._reference = dict(reference) if reference else None
         self._window_size = window_size
-        self._reset_every = reset_every
+        self._recompute_every = recompute_every
         self._buffers: dict[str, deque] = {
             name: deque(maxlen=window_size) for name in (self._reference or {})
         }
@@ -119,8 +120,8 @@ class DriftTracker:
             self._drift = {}
             self._observations = 0
 
-    def observe(self, values: Mapping[str, float]) -> None:
-        """Append one prediction's feature vector and recompute drift on cadence."""
+    def observe(self, values: Mapping[str, float]) -> dict[str, float] | None:
+        """Append one prediction's features; return the drifts when recomputed."""
         with self._lock:
             self._observations += 1
             for name, value in values.items():
@@ -129,8 +130,14 @@ class DriftTracker:
                     continue
                 buffer.append(float(value))
 
-            if self._observations % self._reset_every == 0:
+            # A partial window gives noisy PSI: wait until it is full.
+            if (
+                self._observations >= self._window_size
+                and self._observations % self._recompute_every == 0
+            ):
                 self._drift = self._compute()
+                return dict(self._drift)
+            return None
 
     def current(self) -> dict[str, float]:
         """Return the last computed per-feature drifts (empty before the first recompute)."""

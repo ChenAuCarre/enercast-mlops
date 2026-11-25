@@ -20,4 +20,4 @@ USER appuser
 # MLFLOW_TRACKING_URI / _USERNAME / _PASSWORD, REFRESH_API_TOKEN.
 # Cloud Run / Render inject PORT.
 EXPOSE 8000
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log"]
