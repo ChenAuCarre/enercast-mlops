@@ -32,6 +32,8 @@ def _configure_drift(reference):
 def _load_drift_profile():
     # Network fetch that can be slow or retry: never run it on the startup path.
     version = holder.version
+    if version is None:
+        return  # nothing loaded: no champion to compare against
     profile = holder.training_profile()
     if holder.version != version:
         return  # a refresh moved the champion meanwhile; its own load will configure

@@ -107,6 +107,7 @@ def test_load_drift_profile_feeds_the_tracker_with_real_training_profile(monkeyp
     profile = build_training_profile(X, "v1")
     tracker = DriftTracker()
     monkeypatch.setattr(main, "drift_tracker", tracker)
+    monkeypatch.setattr(main.holder, "state", (object(), {"resolved_version": "1"}))
     monkeypatch.setattr(main.holder, "training_profile", lambda: profile)
 
     main._load_drift_profile()
@@ -115,3 +116,15 @@ def test_load_drift_profile_feeds_the_tracker_with_real_training_profile(monkeyp
     tracker.observe({"a": 1.0, "b": 1.0})
     assert set(tracker._buffers) == {"a", "b"}
     assert all(len(buf) == 1 for buf in tracker._buffers.values())
+
+
+def test_load_drift_profile_is_a_no_op_without_a_loaded_champion(monkeypatch):
+    from app import main
+
+    tracker = DriftTracker()
+    monkeypatch.setattr(main, "drift_tracker", tracker)
+    monkeypatch.setattr(main.holder, "state", None)
+
+    main._load_drift_profile()
+
+    assert not tracker.enabled
