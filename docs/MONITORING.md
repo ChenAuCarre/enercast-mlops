@@ -33,6 +33,8 @@ a `/refresh`).
   `prediction_made` (model_version, prediction, latency_ms, feature_count).
 - Model lifecycle events: `model_loaded`, `champion_model_load_failed`,
   `drift_profile_loaded`, `drift_profile_missing`, `model_refreshed`.
+- Drift event: `data_drift_detected` (warning, with the `features` above the threshold)
+  at each recompute where a feature drifted.
 - 5xx responses are logged with level `error`, 4xx with `warning`.
 - The request id comes from the `X-Request-ID` header (generated when missing) and
   is echoed in the response and attached to every log line of the request.
@@ -61,7 +63,8 @@ The API serves its metrics at `GET /metrics` through `prometheus_client`.
 - Reference: `training-profile.json` artifact of the champion version
   (per feature: bin edges and the real training share of each bin).
 - Live distribution: last 500 predictions per feature (`DRIFT_WINDOW_SIZE`).
-- Recomputed every 100 predictions (`DRIFT_WINDOW_RESET_EVERY`).
+- Recomputed every 100 predictions (`DRIFT_RECOMPUTE_EVERY`) once the window is
+  full, so the first value appears after 500 predictions.
 - Threshold: `DRIFT_THRESHOLD = 0.20` (PSI).
 - `day_of_week` is not tracked: a 3.5-day window never holds all 7 weekdays.
 - When the champion has no training profile, drift monitoring is disabled and a
@@ -78,10 +81,10 @@ docker compose logs api --no-log-prefix
 
 - API: http://localhost:8000
 - Prometheus: http://localhost:9090/targets
-- Grafana: http://localhost:3000 (user `admin`, password `GRAFANA_ADMIN_PASSWORD`, default `admin`)
+- Grafana: http://localhost:3000 (user `admin`, password `GRAFANA_ADMIN_PASSWORD`, required)
 
-All ports are bound to `127.0.0.1`. Set `ALERT_EMAIL_TO` and the `SMTP_*` variables
-for alert emails (see `.env.example`).
+All ports are bound to `127.0.0.1`. Set `SMTP_ENABLED=true`, `ALERT_EMAIL_TO` and the
+`SMTP_*` variables for alert emails (see `.env.example`).
 
 ## Replay
 
@@ -101,7 +104,7 @@ alert, which needs real server errors (for example a champion that is not loaded
 answering `503`).
 
 `--shift To=10` adds a delta to a feature in every row, to simulate drift and
-trigger the drift alert after 100+ predictions (repeat the flag for several features).
+trigger the drift alert after 500+ predictions (repeat the flag for several features).
 
 ## Alerts
 
@@ -111,7 +114,8 @@ The Grafana alerting rules provisioned in `monitoring/grafana-alerting.yml`:
 2. High error rate: more than 5% of all API requests (including `/health` checks and
    Prometheus scrapes) failed with a 5xx status
    over 2 minutes.
-3. Data drift: a feature drifted above 0.20 PSI for 2 minutes.
+3. Data drift: a feature drifted above 0.20 PSI for 2 minutes while predictions are
+   flowing (the gauge keeps its last value when traffic stops; the rule ignores it then).
 
 The no-data state is set to `OK` (shown as Normal) for the error-rate and drift rules so that
 restarts of the API do not fire false alerts.

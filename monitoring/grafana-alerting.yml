@@ -101,7 +101,8 @@ groups:
             datasourceUid: prometheus
             model:
               refId: A
-              expr: 'max(feature_drift{job="api"})'
+              # No traffic -> no data (OK): the gauge keeps its last value after traffic stops.
+              expr: 'max(feature_drift{job="api"}) and on() (sum(rate(predictions_total{job="api"}[10m])) > 0)'
               instant: true
           - refId: B
             datasourceUid: __expr__
