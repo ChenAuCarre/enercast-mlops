@@ -253,3 +253,20 @@ def test_model_info_gauge_reports_the_loaded_version(client, monkeypatch):
         pass
 
     assert REGISTRY.get_sample_value("model_info", {"model_version": "2"}) == 1.0
+
+
+def test_metrics_path_label_is_bounded_for_unknown_paths(client):
+    with client() as c:
+        assert c.get("/no-such-path-123").status_code == 404
+
+    assert REGISTRY.get_sample_value(
+        "http_requests_total",
+        {"method": "GET", "path": "unmatched", "status": "404"},
+    )
+    assert (
+        REGISTRY.get_sample_value(
+            "http_requests_total",
+            {"method": "GET", "path": "/no-such-path-123", "status": "404"},
+        )
+        is None
+    )

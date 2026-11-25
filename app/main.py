@@ -100,9 +100,10 @@ async def request_logging(request: Request, call_next):
                 "duration_ms": round(duration_seconds * 1000, 3),
             },
         )
+        route = request.scope.get("route")  # template, so 404 scans can't mint labels
         metrics.observe_http_request(
             method=request.method,
-            path=request.url.path,
+            path=route.path if route else "unmatched",
             status=status,
             duration_seconds=duration_seconds,
         )
