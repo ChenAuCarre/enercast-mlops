@@ -81,8 +81,8 @@ jobs:
       - name: Resolve current champion version before training
         id: champion_before
         env:
-          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-          MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+          MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_USERNAME: ${{ vars.MLFLOW_TRACKING_USERNAME }}
           MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
         run: |
           set -euo pipefail
@@ -126,8 +126,8 @@ jobs:
         id: training
         env:
           DATASET_VERSION: ${{ inputs['dataset-version'] }}
-          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-          MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+          MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_USERNAME: ${{ vars.MLFLOW_TRACKING_USERNAME }}
           MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
         run: |
           set -euo pipefail
@@ -137,8 +137,8 @@ jobs:
       - name: Resolve promoted champion version after training
         id: champion_after
         env:
-          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-          MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+          MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_USERNAME: ${{ vars.MLFLOW_TRACKING_USERNAME }}
           MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
         run: |
           set -euo pipefail
@@ -187,7 +187,7 @@ jobs:
       - name: Check inference service configuration
         id: api
         env:
-          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
           REFRESH_API_TOKEN: ${{ secrets.REFRESH_API_TOKEN }}
           AFTER: ${{ steps.champion_after.outputs.version }}
           CHAMPION_CHANGED: ${{ steps.champion_after.outputs.version != steps.champion_before.outputs.version }}
@@ -200,7 +200,7 @@ jobs:
           fi
           echo "available=false" >> "$GITHUB_OUTPUT"
           if [ "${CHAMPION_CHANGED}" = "true" ]; then
-            echo "::warning::API_BASE_URL and/or REFRESH_API_TOKEN are not configured. The champion alias was updated, but the inference service was not refreshed or verified. Configure both secrets, then run rollback.yml with the current champion version ${AFTER:-} to execute the live verification."
+            echo "::warning::API_BASE_URL and/or REFRESH_API_TOKEN are not configured. The champion alias was updated, but the inference service was not refreshed or verified. Configure the API_BASE_URL variable and the REFRESH_API_TOKEN secret, then run rollback.yml with the current champion version ${AFTER:-} to execute the live verification."
           else
             echo "::notice::Inference service secrets are not configured; live verification is skipped (the champion was not changed)."
           fi
@@ -210,12 +210,12 @@ jobs:
           steps.champion_after.outputs.version != steps.champion_before.outputs.version &&
           steps.api.outputs.available == 'true'
         env:
-          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
           REFRESH_API_TOKEN: ${{ secrets.REFRESH_API_TOKEN }}
           EXPECTED_VERSION: ${{ steps.champion_after.outputs.version }}
         run: |
           set -euo pipefail
-          : "${API_BASE_URL:?API_BASE_URL secret is required}"
+          : "${API_BASE_URL:?API_BASE_URL variable is required}"
           : "${REFRESH_API_TOKEN:?REFRESH_API_TOKEN secret is required}"
           : "${EXPECTED_VERSION:?Expected champion version is required}"
           API_BASE_URL="${API_BASE_URL%/}"
@@ -240,13 +240,13 @@ jobs:
           steps.champion_after.outputs.version != steps.champion_before.outputs.version &&
           steps.api.outputs.available == 'true'
         env:
-          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
           EXPECTED_VERSION: ${{ steps.champion_after.outputs.version }}
           HEALTH_MAX_ATTEMPTS: "10"
           HEALTH_RETRY_DELAY_SECONDS: "15"
         run: |
           set -euo pipefail
-          : "${API_BASE_URL:?API_BASE_URL secret is required}"
+          : "${API_BASE_URL:?API_BASE_URL variable is required}"
           : "${EXPECTED_VERSION:?Expected champion version is required}"
           API_BASE_URL="${API_BASE_URL%/}"
           HEALTH_FILE="${RUNNER_TEMP}/health_response.json"
@@ -299,11 +299,11 @@ jobs:
           steps.champion_after.outputs.version != steps.champion_before.outputs.version &&
           steps.api.outputs.available == 'true'
         env:
-          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
           EXPECTED_VERSION: ${{ steps.champion_after.outputs.version }}
         run: |
           set -euo pipefail
-          : "${API_BASE_URL:?API_BASE_URL secret is required}"
+          : "${API_BASE_URL:?API_BASE_URL variable is required}"
           : "${EXPECTED_VERSION:?Expected champion version is required}"
           API_BASE_URL="${API_BASE_URL%/}"
           PAYLOAD='{"date": "2016-05-15 19:30:00", "lights": 20, "T1": 22.5, "RH_1": 41.2, "T2": 21.8, "RH_2": 40.5, "T3": 23.1, "RH_3": 39.8, "T4": 21.4, "RH_4": 38.9, "T5": 20.2, "RH_5": 48.1, "T6": 14.3, "RH_6": 62.0, "T7": 20.8, "RH_7": 37.5, "T8": 22.0, "RH_8": 42.1, "T9": 20.5, "RH_9": 41.0, "To": 13.8, "Pressure": 756.4, "RH_out": 65.0, "Windspeed": 4.2, "Visibility": 40.0, "Tdewpoint": 7.3}'
