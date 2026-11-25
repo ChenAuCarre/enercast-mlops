@@ -10,16 +10,26 @@
 
 ```mermaid
 flowchart TB
-    subgraph Training["Continuous Training"]
+    DVC[("DagsHub Storage<br/>DVC remote")]
+    subgraph Training["Continuous Training & Rollback (GitHub Actions)"]
         direction LR
-        DVC[("DagsHub Storage<br/>DVC data v1/v2")] --> CT["GitHub Actions<br/>CT pipeline"]
+        CT["ct-retrain.yml"]
+        RB["rollback.yml"]
     end
-    CT -- "log + register<br/>(@champion if gates pass)" --> MLF[("DagsHub MLflow<br/>Tracking + Registry")]
-    subgraph Serving["Serving"]
+    DVC -- "dvc pull<br/>selected version" --> CT
+    CT -- "1. log runs; register + move @champion<br/>only if gates pass" --> MLF[("DagsHub MLflow<br/>Tracking + Registry")]
+    RB -- "1. move @champion<br/>to an approved version" --> MLF
+    subgraph Delivery["CI/CD (GitHub Actions)"]
         direction LR
-        User(["User"]) -- HTTPS --> Host["Cloud Hosting"] --> API["FastAPI<br/>(Slim Docker)"]
+        STG["cd-staging<br/>build + smoke test"] --> GHCR[("GHCR image<br/>sha / tree tag")] --> PROD["cd-prod<br/>deploy by digest"]
     end
-    MLF -- "load @champion" --> API
+    subgraph Serving["Render"]
+        direction LR
+        User(["User"]) -- HTTPS --> API["FastAPI + Web UI<br/>(slim Docker)"]
+    end
+    PROD -- "deploy hook" --> API
+    MLF -- "3. load @champion<br/>(also at startup)" --> API
+    Training -. "2. only after the alias moved:<br/>POST /refresh, then live check" .-> API
 ```
 
 * **Application & Inference**: Python, FastAPI, Pydantic, Scikit-Learn
