@@ -26,6 +26,7 @@ Configuration is read from environment variables at start-up (`.env` is passed w
 | `MLFLOW_TRACKING_USERNAME` / `MLFLOW_TRACKING_PASSWORD` | Registry credentials |
 | `REFRESH_API_TOKEN` | Token for `POST /refresh` (the endpoint is disabled when unset) |
 | `PORT` | Listen port, default `8000` (hosting platforms inject it) |
+| `LOG_LEVEL` | Level of the JSON logs on stdout, default `INFO` |
 
 ## Workflows and the branches that trigger them
 

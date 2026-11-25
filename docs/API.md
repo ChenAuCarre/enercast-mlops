@@ -15,6 +15,9 @@ The inference service exposes a RESTful JSON API built with FastAPI. Upon startu
 | `GET` | `/model-info` | Public | Returns the resolved MLflow model name, alias, concrete version, and run metadata. |
 | `POST` | `/predict` | Public | Predicts appliance energy consumption (`Wh`) for a single 10-minute observation. |
 | `POST` | `/refresh` | `X-Refresh-Token` header | Reloads the active `@champion` model from MLflow without container restart. |
+| `GET` | `/metrics` | Public | Prometheus metrics: HTTP requests, predictions, served model version, feature drift (PSI). |
+
+Every response carries an `X-Request-ID` header: the one sent by the client, or a generated id. The same id is in the JSON log lines of that request.
 
 ---
 
