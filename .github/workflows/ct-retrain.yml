@@ -16,6 +16,13 @@ on:
         options:
           - v1
           - v2
+      force-initial-training:
+        description: >-
+          Allow v1 to replace an existing champion. Use only for a deliberate
+          registry rebuild (for example issue #25), never for routine training.
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   # Serialize every run that can move the champion alias (CT and rollback).
@@ -112,6 +119,7 @@ jobs:
         env:
           DATASET_VERSION: ${{ inputs['dataset-version'] }}
           CHAMPION_VERSION: ${{ steps.champion_before.outputs.version }}
+          FORCE_INITIAL_TRAINING: ${{ inputs['force-initial-training'] }}
         run: |
           set -euo pipefail
           if [ "$DATASET_VERSION" = "v2" ] && [ -z "$CHAMPION_VERSION" ]; then
@@ -119,21 +127,30 @@ jobs:
             exit 1
           fi
           if [ "$DATASET_VERSION" = "v1" ] && [ -n "$CHAMPION_VERSION" ]; then
-            echo "::error::A champion already exists (version ${CHAMPION_VERSION}). v1 is reserved for the initial release; use dataset-version=v2 for continuous training."
-            exit 1
+            if [ "$FORCE_INITIAL_TRAINING" = "true" ]; then
+              echo "::warning::force-initial-training is enabled: the v1 baseline will replace champion version ${CHAMPION_VERSION}."
+            else
+              echo "::error::A champion already exists (version ${CHAMPION_VERSION}). v1 is reserved for the initial release; use dataset-version=v2 for continuous training, or enable force-initial-training for a deliberate registry rebuild."
+              exit 1
+            fi
           fi
 
       - name: Run continuous training and promotion
         id: training
         env:
           DATASET_VERSION: ${{ inputs['dataset-version'] }}
+          FORCE_INITIAL_TRAINING: ${{ inputs['force-initial-training'] }}
           MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
           MLFLOW_TRACKING_USERNAME: ${{ vars.MLFLOW_TRACKING_USERNAME }}
           MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
         run: |
           set -euo pipefail
           : "${MLFLOW_TRACKING_URI:?MLFLOW_TRACKING_URI secret is required}"
-          uv run python -m ml.pipeline --dataset-version "$DATASET_VERSION"
+          args=(--dataset-version "$DATASET_VERSION")
+          if [ "$FORCE_INITIAL_TRAINING" = "true" ]; then
+            args+=(--force-initial-training)
+          fi
+          uv run python -m ml.pipeline "${args[@]}"
 
       - name: Resolve promoted champion version after training
         id: champion_after
