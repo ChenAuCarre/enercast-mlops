@@ -8,11 +8,11 @@ behind the production champion.
 
 - **Tracking server and model registry:** the shared, persistent MLflow server
   hosted on DagsHub.
-- **Configuration:** `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME`, and
-  `MLFLOW_TRACKING_PASSWORD` are provided as environment variables (GitHub
-  Actions secrets in the workflows).
+- **Configuration:** `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME` and
+  `MLFLOW_TRACKING_PASSWORD` from the environment (see
+  [`docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md)).
 - **Experiment:** `WattWise-energy-forecasting-final`.
-- **Registered model:** `wattwise-energy-forecaster-final`.
+- **Registered model:** `wattwise-energy-forecaster`.
 - **Champion alias:** `champion`.
 - **Approval tags:** `champion_approved=true` and
   `champion_approval_reason` on the promoted model version.
@@ -20,9 +20,8 @@ behind the production champion.
   continuous-training workflow and the deployed app must use the shared
   registry.
 
-The inference service resolves the `champion` alias to a concrete version at
-startup and on `/refresh`, and reports the loaded version in `/model-info`,
-`/health`, and `/predict` (see `docs/API.md`).
+How the inference service loads and reports the champion is described in
+[`docs/API.md`](../docs/API.md).
 
 ## 2. Primary metric
 
@@ -250,22 +249,14 @@ In GitHub Actions:
   the loaded version with a live prediction.
 - `rollback.yml` restores a previously approved version, refreshes the service,
   and verifies it with a live prediction.
-- Both workflows read their credentials from repository-level GitHub secrets
-  (`DAGSHUB_USERNAME`, `DAGSHUB_TOKEN`, `MLFLOW_TRACKING_URI`,
-  `MLFLOW_TRACKING_USERNAME`, `MLFLOW_TRACKING_PASSWORD`, `API_BASE_URL`,
-  `REFRESH_API_TOKEN`) and share the `ct-retrain-champion-registry` concurrency
-  group, so they never move the alias concurrently.
-- The three inference-service steps (refresh, health/model-info verification,
-  live prediction) are skipped with a warning when `API_BASE_URL` and
-  `REFRESH_API_TOKEN` are not configured. Training, evaluation, promotion, and
-  rollback still run and remain fully auditable in MLflow. Once the service is
-  deployed, configure both secrets and run `rollback.yml` targeting the current
-  champion version (or wait for the next promotion) to execute the live
-  verification. The job summary states whether the service was verified or
-  skipped.
-- `workflow_dispatch` only appears once the workflow file is present on the
-  default branch (`dev`). A first run can therefore validate `v1`, then `v2`,
-  before the inference API exists.
+- Both workflows share the `ct-retrain-champion-registry` concurrency group,
+  so they never move the alias concurrently. Their variables and secrets are
+  listed in [`docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md#github-settings-used-by-the-workflows).
+- If `API_BASE_URL` or `REFRESH_API_TOKEN` is missing, `ct-retrain.yml`
+  skips the live refresh and verification with a warning (the job summary
+  says so), and `rollback.yml` fails before moving the alias.
+- Both workflows can only be dispatched once they are on the default branch
+  (`main`), so they run from released code.
 
 ## 10. Decision log and rollback
 
@@ -278,15 +269,8 @@ In GitHub Actions:
 - Rollback uses `rollback_champion` with an explicit reason. The target must be
   `READY` and carry `champion_approved=true`. The rollback audit run records
   the operation.
-- If the service does not become ready after a promotion, the alias may already
-  point to the new version while the running service still serves the previous
-  one. The workflow fails and reports the previous champion version. Dispatch
-  `rollback.yml` with that version and a reason: it restores the alias, asks the
-  service to refresh, and verifies the restored version with a live prediction.
-  If the service also fails on the restored version, the fault is in the
-  deployment rather than the model: redeploy the last known-good image. The
-  service must not report `/health` ready until it can serve predictions with
-  the approved version.
+- If the service does not become ready after a promotion, follow
+  [`docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md#when-the-app-does-not-become-ready-after-a-model-change).
 
 ## 11. Known limitations
 

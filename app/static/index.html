@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EnerCast — Prédiction de consommation électrique</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-hover: #0284c7;
+      --success: #22c55e;
+      --danger: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 2rem 1rem 4rem;
+    }
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 2rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 { margin: 0; font-size: 1.6rem; }
+    .subtitle { color: var(--muted); font-size: 0.9rem; margin: 0.2rem 0 0; }
+    .badge-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    .badge {
+      background: var(--card);
+      border: 1px solid var(--border);
+      padding: 0.35rem 0.75rem;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    .badge strong { color: var(--text); }
+    .dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      margin-right: 6px;
+    }
+    .dot.ready { background: var(--success); }
+    .dot.error { background: var(--danger); }
+
+    .grid-layout {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 880px) {
+      .grid-layout { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+    }
+    .card h2 {
+      margin: 0 0 1rem;
+      font-size: 1.1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .presets {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-bottom: 1.25rem;
+    }
+    button {
+      cursor: pointer;
+      border: none;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.88rem;
+      transition: background 0.15s;
+    }
+    .btn-secondary {
+      background: #334155;
+      color: var(--text);
+      padding: 0.45rem 0.8rem;
+    }
+    .btn-secondary:hover { background: #475569; }
+    .btn-primary {
+      width: 100%;
+      background: var(--accent);
+      color: #0f172a;
+      padding: 0.8rem 1rem;
+      font-size: 1rem;
+      margin-top: 1rem;
+    }
+    .btn-primary:hover { background: var(--accent-hover); color: #fff; }
+    .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    fieldset {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.9rem;
+      margin: 0 0 1rem;
+    }
+    legend {
+      padding: 0 0.5rem;
+      color: var(--accent);
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .fields-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(135px, 1fr));
+      gap: 0.75rem;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+    .field.wide { grid-column: span 2; }
+    label {
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    input {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.45rem 0.6rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      width: 100%;
+    }
+    input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .result-box {
+      text-align: center;
+      padding: 1.5rem 1rem;
+      background: var(--bg);
+      border-radius: 10px;
+      border: 1px solid var(--border);
+    }
+    .result-value {
+      font-size: 2.6rem;
+      font-weight: 800;
+      color: var(--accent);
+      line-height: 1.1;
+    }
+    .result-unit {
+      font-size: 1rem;
+      color: var(--muted);
+      margin-top: 0.25rem;
+    }
+    .meta-list {
+      margin-top: 1.25rem;
+      font-size: 0.85rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.35rem;
+    }
+    .meta-row span:first-child { color: var(--muted); }
+    .error-banner {
+      display: none;
+      margin-top: 1rem;
+      padding: 0.75rem;
+      border-radius: 8px;
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid var(--danger);
+      color: #fca5a5;
+      font-size: 0.85rem;
+      word-break: break-word;
+    }
+    .docs-link {
+      display: inline-block;
+      margin-top: 1rem;
+      color: var(--accent);
+      font-size: 0.85rem;
+      text-decoration: none;
+    }
+    .docs-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>EnerCast MLOps</h1>
+        <p class="subtitle">Prédiction de consommation des appareils électroménagers (Wh)</p>
+      </div>
+      <div class="badge-bar">
+        <span class="badge"><span id="status-dot" class="dot"></span><strong id="status-text">Chargement...</strong></span>
+        <span class="badge">Modèle : <strong id="badge-version">—</strong></span>
+        <span class="badge">Dataset : <strong id="badge-dataset">—</strong></span>
+      </div>
+    </header>
+
+    <div class="grid-layout">
+      <!-- Formulaire -->
+      <div class="card">
+        <h2>Paramètres des capteurs</h2>
+        <div class="presets">
+          <button type="button" class="btn-secondary" onclick="applyPreset('evening')">Preset : Soirée active (19h30)</button>
+          <button type="button" class="btn-secondary" onclick="applyPreset('night')">Preset : Nuit calme (03h00)</button>
+          <button type="button" class="btn-secondary" onclick="applyPreset('summer')">Preset : Après-midi chaud (15h00)</button>
+        </div>
+
+        <form id="predict-form">
+          <fieldset>
+            <legend>Horodatage & Éclairage</legend>
+            <div class="fields-grid">
+              <div class="field wide">
+                <label for="date">Date (YYYY-MM-DD HH:MM:SS)</label>
+                <input id="date" name="date" type="text" required />
+              </div>
+              <div class="field">
+                <label for="lights">Lights (Wh, ≥ 0)</label>
+                <input id="lights" name="lights" type="number" step="any" min="0" required />
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Météo extérieure</legend>
+            <div class="fields-grid">
+              <div class="field"><label for="To">To (°C)</label><input id="To" name="To" type="number" step="any" min="-40" max="60" required /></div>
+              <div class="field"><label for="RH_out">RH_out (%)</label><input id="RH_out" name="RH_out" type="number" step="any" min="0" max="100" required /></div>
+              <div class="field"><label for="Pressure">Pressure (mmHg)</label><input id="Pressure" name="Pressure" type="number" step="any" min="650" max="850" required /></div>
+              <div class="field"><label for="Windspeed">Windspeed (m/s)</label><input id="Windspeed" name="Windspeed" type="number" step="any" min="0" required /></div>
+              <div class="field"><label for="Visibility">Visibility (km)</label><input id="Visibility" name="Visibility" type="number" step="any" min="0" required /></div>
+              <div class="field"><label for="Tdewpoint">Tdewpoint (°C)</label><input id="Tdewpoint" name="Tdewpoint" type="number" step="any" min="-50" max="50" required /></div>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Températures intérieures T1 – T9 (°C)</legend>
+            <div class="fields-grid" id="temp-fields"></div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Humidités intérieures RH_1 – RH_9 (%)</legend>
+            <div class="fields-grid" id="rh-fields"></div>
+          </fieldset>
+
+          <button id="submit-btn" type="submit" class="btn-primary">Prédire la consommation</button>
+        </form>
+      </div>
+
+      <!-- Résultat & Infos modèle -->
+      <div class="card">
+        <h2>Résultat de l'inférence</h2>
+        <div class="result-box">
+          <div id="result-value" class="result-value">—</div>
+          <div class="result-unit">Wh (Appliances)</div>
+        </div>
+
+        <div id="error-banner" class="error-banner"></div>
+
+        <div class="meta-list">
+          <div class="meta-row"><span>Nom du modèle</span><strong id="info-name">—</strong></div>
+          <div class="meta-row"><span>Alias</span><strong id="info-alias">—</strong></div>
+          <div class="meta-row"><span>Version servie</span><strong id="info-version">—</strong></div>
+          <div class="meta-row"><span>Dataset d'entraînement</span><strong id="info-dataset">—</strong></div>
+          <div class="meta-row"><span>Run ID MLflow</span><strong id="info-run" style="font-size:0.75rem;">—</strong></div>
+          <div class="meta-row"><span>Chargé à (UTC)</span><strong id="info-loaded">—</strong></div>
+        </div>
+
+        <a class="docs-link" href="/docs" target="_blank">Accéder à la documentation OpenAPI (/docs) →</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const TEMP_LABELS = [
+      "T1 (Cuisine)", "T2 (Salon)", "T3 (Buanderie)",
+      "T4 (Bureau)", "T5 (Salle de bain)", "T6 (Ext. Nord)",
+      "T7 (Repassage)", "T8 (Chambre ado)", "T9 (Chambre parents)"
+    ];
+    const RH_LABELS = [
+      "RH_1 (Cuisine)", "RH_2 (Salon)", "RH_3 (Buanderie)",
+      "RH_4 (Bureau)", "RH_5 (Salle de bain)", "RH_6 (Ext. Nord)",
+      "RH_7 (Repassage)", "RH_8 (Chambre ado)", "RH_9 (Chambre parents)"
+    ];
+
+    const PRESETS = {
+      evening: {
+        date: "2016-05-15 19:30:00", lights: 20,
+        T1: 22.5, RH_1: 41.2, T2: 21.8, RH_2: 40.5, T3: 23.1, RH_3: 39.8,
+        T4: 21.4, RH_4: 38.9, T5: 20.2, RH_5: 48.1, T6: 14.3, RH_6: 62.0,
+        T7: 20.8, RH_7: 37.5, T8: 22.0, RH_8: 42.1, T9: 20.5, RH_9: 41.0,
+        To: 13.8, Pressure: 756.4, RH_out: 65.0, Windspeed: 4.2, Visibility: 40.0, Tdewpoint: 7.3
+      },
+      night: {
+        date: "2016-02-10 03:00:00", lights: 0,
+        T1: 19.2, RH_1: 43.0, T2: 18.5, RH_2: 42.5, T3: 19.8, RH_3: 41.0,
+        T4: 18.8, RH_4: 40.2, T5: 18.0, RH_5: 50.0, T6: 4.5, RH_6: 85.0,
+        T7: 18.1, RH_7: 39.0, T8: 18.9, RH_8: 44.0, T9: 18.2, RH_9: 43.5,
+        To: 4.1, Pressure: 748.0, RH_out: 88.0, Windspeed: 6.5, Visibility: 25.0, Tdewpoint: 2.3
+      },
+      summer: {
+        date: "2016-05-22 15:00:00", lights: 0,
+        T1: 24.8, RH_1: 38.5, T2: 25.4, RH_2: 36.2, T3: 25.0, RH_3: 37.8,
+        T4: 24.5, RH_4: 36.0, T5: 23.2, RH_5: 44.5, T6: 24.0, RH_6: 42.0,
+        T7: 23.8, RH_7: 35.5, T8: 24.2, RH_8: 38.0, T9: 23.5, RH_9: 37.5,
+        To: 23.6, Pressure: 762.1, RH_out: 45.0, Windspeed: 2.8, Visibility: 40.0, Tdewpoint: 10.9
+      }
+    };
+
+    function buildSensorInputs() {
+      const tempContainer = document.getElementById("temp-fields");
+      const rhContainer = document.getElementById("rh-fields");
+      for (let i = 1; i <= 9; i++) {
+        tempContainer.innerHTML += `
+          <div class="field">
+            <label for="T${i}">${TEMP_LABELS[i - 1]}</label>
+            <input id="T${i}" name="T${i}" type="number" step="any" min="-20" max="60" required />
+          </div>`;
+        rhContainer.innerHTML += `
+          <div class="field">
+            <label for="RH_${i}">${RH_LABELS[i - 1]}</label>
+            <input id="RH_${i}" name="RH_${i}" type="number" step="any" min="0" max="100" required />
+          </div>`;
+      }
+    }
+
+    function applyPreset(name) {
+      const data = PRESETS[name];
+      if (!data) return;
+      for (const [key, val] of Object.entries(data)) {
+        const el = document.getElementById(key);
+        if (el) el.value = val;
+      }
+    }
+
+    async function loadModelInfo() {
+      const dot = document.getElementById("status-dot");
+      const statusText = document.getElementById("status-text");
+      try {
+        const res = await fetch("/model-info");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const info = await res.json();
+        dot.className = "dot ready";
+        statusText.textContent = "Service prêt";
+        document.getElementById("badge-version").textContent = `v${info.resolved_version}`;
+        document.getElementById("badge-dataset").textContent = info.dataset_version || "—";
+        document.getElementById("info-name").textContent = info.model_name;
+        document.getElementById("info-alias").textContent = `@${info.alias}`;
+        document.getElementById("info-version").textContent = `v${info.resolved_version}`;
+        document.getElementById("info-dataset").textContent = info.dataset_version || "—";
+        document.getElementById("info-run").textContent = info.mlflow_run_id;
+        document.getElementById("info-loaded").textContent = info.loaded_at_utc;
+      } catch (err) {
+        dot.className = "dot error";
+        statusText.textContent = "Modèle indisponible";
+      }
+    }
+
+    document.getElementById("predict-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById("submit-btn");
+      const errBanner = document.getElementById("error-banner");
+      const resVal = document.getElementById("result-value");
+
+      btn.disabled = true;
+      btn.textContent = "Calcul en cours...";
+      errBanner.style.display = "none";
+
+      const formData = new FormData(e.target);
+      const payload = {};
+      for (const [k, v] of formData.entries()) {
+        payload[k] = k === "date" ? v.trim() : Number(v);
+      }
+
+      try {
+        const res = await fetch("/predict", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          const detail = Array.isArray(data.detail)
+            ? data.detail.map(d => `${d.loc.slice(-1)[0]}: ${d.msg}`).join(" | ")
+            : (data.detail || `Erreur HTTP ${res.status}`);
+          throw new Error(detail);
+        }
+        resVal.textContent = data.predicted_appliances_wh.toFixed(2);
+        document.getElementById("info-version").textContent = `v${data.model_version}`;
+        document.getElementById("badge-version").textContent = `v${data.model_version}`;
+      } catch (err) {
+        errBanner.textContent = err.message;
+        errBanner.style.display = "block";
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Prédire la consommation";
+      }
+    });
+
+    buildSensorInputs();
+    applyPreset("evening");
+    loadModelInfo();
+  </script>
+</body>
+</html>

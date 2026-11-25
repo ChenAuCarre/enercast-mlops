@@ -1,0 +1,370 @@
+name: ct-retrain
+
+run-name: >-
+  CT ${{ inputs['dataset-version'] }} on ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset-version:
+        description: >-
+          DVC dataset version. v1 is reserved for the initial release (no
+          champion yet); v2 is for continuous training (a champion must exist).
+        required: true
+        default: "v2"
+        type: choice
+        options:
+          - v1
+          - v2
+
+concurrency:
+  # Serialize every run that can move the champion alias (CT and rollback).
+  group: ct-retrain-champion-registry
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # Never let a CI run rewrite the lockfile.
+  UV_FROZEN: "1"
+  PYTHONUNBUFFERED: "1"
+  DVC_NO_ANALYTICS: "1"
+
+jobs:
+  continuous-training:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (github.ref_name == 'dev' || github.ref_name == 'staging' || github.ref_name == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.4.0
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        run: uv sync --frozen --group experiment
+
+      # DagsHub uses the same account and token for MLflow and the DVC remote.
+      - name: Configure DVC remote credentials (DagsHub)
+        env:
+          MLFLOW_TRACKING_USERNAME: ${{ vars.MLFLOW_TRACKING_USERNAME }}
+          MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${MLFLOW_TRACKING_USERNAME:?MLFLOW_TRACKING_USERNAME variable is required}"
+          : "${MLFLOW_TRACKING_PASSWORD:?MLFLOW_TRACKING_PASSWORD secret is required}"
+          uv run dvc remote modify origin --local auth basic
+          uv run dvc remote modify origin --local user "$MLFLOW_TRACKING_USERNAME"
+          uv run dvc remote modify origin --local password "$MLFLOW_TRACKING_PASSWORD"
+
+      - name: Pull selected dataset snapshot from DagsHub
+        env:
+          DATASET_VERSION: ${{ inputs['dataset-version'] }}
+        run: |
+          set -euo pipefail
+          DVC_FILE="data/versions/${DATASET_VERSION}/train.csv.dvc"
+          test -f "$DVC_FILE" || {
+            echo "::error::Missing DVC pointer: ${DVC_FILE}"
+            exit 1
+          }
+          uv run dvc pull --remote origin "$DVC_FILE"
+
+      - name: Resolve current champion version before training
+        id: champion_before
+        env:
+          MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_USERNAME: ${{ vars.MLFLOW_TRACKING_USERNAME }}
+          MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${MLFLOW_TRACKING_URI:?MLFLOW_TRACKING_URI secret is required}"
+          VERSION_FILE="${RUNNER_TEMP}/champion_version_before.txt"
+          ERROR_FILE="${RUNNER_TEMP}/champion_error_before.txt"
+          RC=0
+          uv run python - <<'PY' > "$VERSION_FILE" 2> "$ERROR_FILE" || RC=$?
+          from ml.registry import NoChampionRegistered, get_champion
+
+          try:
+              print(get_champion().version)
+          except NoChampionRegistered:
+              print("")
+          PY
+          if [ "${RC}" -ne 0 ]; then
+            echo "::error::Unable to resolve the current champion version from the MLflow registry."
+            cat "$ERROR_FILE"
+            exit 1
+          fi
+          VERSION="$(cat "$VERSION_FILE")"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Champion version before training: ${VERSION:-none}"
+
+      - name: Check dataset version against registry state
+        env:
+          DATASET_VERSION: ${{ inputs['dataset-version'] }}
+          CHAMPION_VERSION: ${{ steps.champion_before.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$DATASET_VERSION" = "v2" ] && [ -z "$CHAMPION_VERSION" ]; then
+            echo "::error::No champion exists yet. Run this workflow with dataset-version=v1 first to establish the baseline champion."
+            exit 1
+          fi
+          if [ "$DATASET_VERSION" = "v1" ] && [ -n "$CHAMPION_VERSION" ]; then
+            echo "::error::A champion already exists (version ${CHAMPION_VERSION}). v1 is reserved for the initial release; use dataset-version=v2 for continuous training."
+            exit 1
+          fi
+
+      - name: Run continuous training and promotion
+        id: training
+        env:
+          DATASET_VERSION: ${{ inputs['dataset-version'] }}
+          MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_USERNAME: ${{ vars.MLFLOW_TRACKING_USERNAME }}
+          MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${MLFLOW_TRACKING_URI:?MLFLOW_TRACKING_URI secret is required}"
+          uv run python -m ml.pipeline --dataset-version "$DATASET_VERSION"
+
+      - name: Resolve promoted champion version after training
+        id: champion_after
+        env:
+          MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_USERNAME: ${{ vars.MLFLOW_TRACKING_USERNAME }}
+          MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${MLFLOW_TRACKING_URI:?MLFLOW_TRACKING_URI secret is required}"
+          VERSION_FILE="${RUNNER_TEMP}/champion_version_after.txt"
+          ERROR_FILE="${RUNNER_TEMP}/champion_error_after.txt"
+          RC=0
+          uv run python - <<'PY' > "$VERSION_FILE" 2> "$ERROR_FILE" || RC=$?
+          from ml.registry import NoChampionRegistered, get_champion
+
+          try:
+              print(get_champion().version)
+          except NoChampionRegistered:
+              raise SystemExit(3)
+          PY
+          if [ "${RC}" -eq 3 ]; then
+            echo "::error::No champion registered after the continuous training run: a champion must exist."
+            cat "$ERROR_FILE"
+            exit 1
+          fi
+          if [ "${RC}" -ne 0 ]; then
+            echo "::error::Unable to resolve the promoted champion version from the MLflow registry."
+            cat "$ERROR_FILE"
+            exit 1
+          fi
+          VERSION="$(cat "$VERSION_FILE")"
+          if [ -z "${VERSION}" ]; then
+            echo "::error::Champion version is empty after the continuous training run."
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Champion version after training: ${VERSION}"
+
+      - name: Record champion outcome
+        env:
+          BEFORE: ${{ steps.champion_before.outputs.version }}
+          AFTER: ${{ steps.champion_after.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "${AFTER}" = "${BEFORE}" ]; then
+            echo "Champion version unchanged (${AFTER}): the champion was retained."
+          else
+            echo "Champion promoted: ${BEFORE:-none} -> ${AFTER}."
+          fi
+
+      - name: Check inference service configuration
+        id: api
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+          REFRESH_API_TOKEN: ${{ secrets.REFRESH_API_TOKEN }}
+          AFTER: ${{ steps.champion_after.outputs.version }}
+          CHAMPION_CHANGED: ${{ steps.champion_after.outputs.version != steps.champion_before.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -n "${API_BASE_URL}" ] && [ -n "${REFRESH_API_TOKEN}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "Inference service secrets are configured: live verification will run."
+            exit 0
+          fi
+          echo "available=false" >> "$GITHUB_OUTPUT"
+          if [ "${CHAMPION_CHANGED}" = "true" ]; then
+            echo "::warning::API_BASE_URL and/or REFRESH_API_TOKEN are not configured. The champion alias was updated, but the inference service was not refreshed or verified. Configure the API_BASE_URL variable and the REFRESH_API_TOKEN secret, then run rollback.yml with the current champion version ${AFTER:-} to execute the live verification."
+          else
+            echo "::notice::Inference service secrets are not configured; live verification is skipped (the champion was not changed)."
+          fi
+
+      - name: Refresh champion in the inference service
+        if: >-
+          steps.champion_after.outputs.version != steps.champion_before.outputs.version &&
+          steps.api.outputs.available == 'true'
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+          REFRESH_API_TOKEN: ${{ secrets.REFRESH_API_TOKEN }}
+          EXPECTED_VERSION: ${{ steps.champion_after.outputs.version }}
+        run: |
+          set -euo pipefail
+          : "${API_BASE_URL:?API_BASE_URL variable is required}"
+          : "${REFRESH_API_TOKEN:?REFRESH_API_TOKEN secret is required}"
+          : "${EXPECTED_VERSION:?Expected champion version is required}"
+          API_BASE_URL="${API_BASE_URL%/}"
+          RESPONSE_FILE="${RUNNER_TEMP}/refresh_response.json"
+          curl --fail-with-body --silent --show-error \
+            --max-time 120 \
+            --retry 3 --retry-delay 5 --retry-connrefused \
+            --request POST \
+            --header "X-Refresh-Token: ${REFRESH_API_TOKEN}" \
+            --output "$RESPONSE_FILE" \
+            "${API_BASE_URL}/refresh"
+          echo "Refresh response: $(cat "$RESPONSE_FILE")"
+          jq -e '.status == "refreshed"' "$RESPONSE_FILE" >/dev/null
+          CURRENT_VERSION="$(jq -r '.current_version // empty' "$RESPONSE_FILE")"
+          if [ -n "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "::error::The service reports current_version=${CURRENT_VERSION}, expected ${EXPECTED_VERSION}."
+            exit 1
+          fi
+
+      - name: Verify refreshed champion version
+        if: >-
+          steps.champion_after.outputs.version != steps.champion_before.outputs.version &&
+          steps.api.outputs.available == 'true'
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+          EXPECTED_VERSION: ${{ steps.champion_after.outputs.version }}
+          HEALTH_MAX_ATTEMPTS: "10"
+          HEALTH_RETRY_DELAY_SECONDS: "15"
+        run: |
+          set -euo pipefail
+          : "${API_BASE_URL:?API_BASE_URL variable is required}"
+          : "${EXPECTED_VERSION:?Expected champion version is required}"
+          API_BASE_URL="${API_BASE_URL%/}"
+          HEALTH_FILE="${RUNNER_TEMP}/health_response.json"
+          ATTEMPT=0
+          while :; do
+            ATTEMPT=$((ATTEMPT + 1))
+            CODE="$(curl --silent --show-error --max-time 15 \
+              --output "$HEALTH_FILE" --write-out "%{http_code}" \
+              "${API_BASE_URL}/health" || true)"
+            case "$CODE" in
+              200) break ;;
+              000|408|429|5??) ;;
+              *)
+                echo "::error::Health endpoint returned HTTP ${CODE}; check API_BASE_URL and the service configuration."
+                cat "$HEALTH_FILE" || true
+                exit 1
+                ;;
+            esac
+            if [ "$ATTEMPT" -ge "$HEALTH_MAX_ATTEMPTS" ]; then
+              echo "::error::Health check failed after ${ATTEMPT} attempts (last HTTP code: ${CODE})."
+              cat "$HEALTH_FILE" || true
+              exit 1
+            fi
+            echo "Health check attempt ${ATTEMPT} failed (HTTP ${CODE}); retrying in ${HEALTH_RETRY_DELAY_SECONDS}s."
+            sleep "$HEALTH_RETRY_DELAY_SECONDS"
+          done
+          echo "Health response: $(cat "$HEALTH_FILE")"
+          jq -e '.status == "ready" and .model_loaded == true' "$HEALTH_FILE" >/dev/null
+          HEALTH_VERSION="$(jq -r '.model_version // empty' "$HEALTH_FILE")"
+          if [ -n "$HEALTH_VERSION" ] && [ "$HEALTH_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "::error::Health reports model_version=${HEALTH_VERSION}, expected ${EXPECTED_VERSION}."
+            exit 1
+          fi
+
+          MODEL_INFO_FILE="${RUNNER_TEMP}/model_info_response.json"
+          curl --fail-with-body --silent --show-error \
+            --max-time 30 --retry 3 --retry-delay 5 --retry-connrefused \
+            --output "$MODEL_INFO_FILE" \
+            "${API_BASE_URL}/model-info"
+          echo "Model info response: $(cat "$MODEL_INFO_FILE")"
+          RESOLVED_VERSION="$(jq -r '.resolved_version' "$MODEL_INFO_FILE")"
+          echo "Resolved champion version: ${RESOLVED_VERSION}"
+          if [ "$RESOLVED_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "::error::Refreshed champion version ${RESOLVED_VERSION} does not match the promoted version ${EXPECTED_VERSION}."
+            exit 1
+          fi
+
+      - name: Live prediction smoke test
+        if: >-
+          steps.champion_after.outputs.version != steps.champion_before.outputs.version &&
+          steps.api.outputs.available == 'true'
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+          EXPECTED_VERSION: ${{ steps.champion_after.outputs.version }}
+        run: |
+          set -euo pipefail
+          : "${API_BASE_URL:?API_BASE_URL variable is required}"
+          : "${EXPECTED_VERSION:?Expected champion version is required}"
+          API_BASE_URL="${API_BASE_URL%/}"
+          PAYLOAD='{"date": "2016-05-15 19:30:00", "lights": 20, "T1": 22.5, "RH_1": 41.2, "T2": 21.8, "RH_2": 40.5, "T3": 23.1, "RH_3": 39.8, "T4": 21.4, "RH_4": 38.9, "T5": 20.2, "RH_5": 48.1, "T6": 14.3, "RH_6": 62.0, "T7": 20.8, "RH_7": 37.5, "T8": 22.0, "RH_8": 42.1, "T9": 20.5, "RH_9": 41.0, "To": 13.8, "Pressure": 756.4, "RH_out": 65.0, "Windspeed": 4.2, "Visibility": 40.0, "Tdewpoint": 7.3}'
+          PREDICT_FILE="${RUNNER_TEMP}/predict_response.json"
+          curl --fail-with-body --silent --show-error \
+            --max-time 30 --retry 3 --retry-delay 5 --retry-connrefused \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --data "$PAYLOAD" \
+            --output "$PREDICT_FILE" \
+            "${API_BASE_URL}/predict"
+          echo "Prediction response: $(cat "$PREDICT_FILE")"
+          PREDICTED_VERSION="$(jq -r '.model_version // empty' "$PREDICT_FILE")"
+          if [ -z "$PREDICTED_VERSION" ]; then
+            echo "::error::Prediction response is missing the mandatory model_version field."
+            exit 1
+          fi
+          if [ "$PREDICTED_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "::error::Prediction was served by model version ${PREDICTED_VERSION}, expected ${EXPECTED_VERSION}."
+            exit 1
+          fi
+          jq -e '.predicted_appliances_wh | type == "number" and . >= 0' "$PREDICT_FILE" >/dev/null
+
+      - name: Publish continuous training summary
+        if: always()
+        env:
+          DATASET_VERSION: ${{ inputs['dataset-version'] }}
+          BEFORE: ${{ steps.champion_before.outputs.version }}
+          AFTER: ${{ steps.champion_after.outputs.version }}
+          API_AVAILABLE: ${{ steps.api.outputs.available }}
+        run: |
+          {
+            echo "## Continuous training summary"
+            echo ""
+            echo "| Item | Value |"
+            echo "| --- | --- |"
+            echo "| Dataset version | ${DATASET_VERSION} |"
+            echo "| Champion before | ${BEFORE:-none} |"
+            echo "| Champion after | ${AFTER:-unknown} |"
+            if [ -n "${AFTER}" ] && [ "${AFTER}" = "${BEFORE}" ]; then
+              echo "| Outcome | Champion retained |"
+            elif [ -n "${AFTER}" ]; then
+              echo "| Outcome | Champion promoted |"
+            else
+              echo "| Outcome | Failed before champion resolution |"
+            fi
+            if [ -z "${AFTER:-}" ]; then
+              echo "| Inference service | Not reached (run failed before promotion) |"
+            elif [ "${AFTER}" = "${BEFORE:-}" ]; then
+              echo "| Inference service | Not required (champion unchanged) |"
+            elif [ "${API_AVAILABLE:-false}" = "true" ]; then
+              echo "| Inference service | Verified (refresh, health, model-info, prediction) |"
+            else
+              echo "| Inference service | Skipped: API_BASE_URL / REFRESH_API_TOKEN not configured |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report rollback hint on failure
+        if: failure() && steps.champion_before.outputs.version != ''
+        env:
+          PREVIOUS_VERSION: ${{ steps.champion_before.outputs.version }}
+        run: |
+          echo "::warning::If the champion alias was moved and the service did not become ready, run rollback.yml with target-version=${PREVIOUS_VERSION} and an incident reason."

@@ -1,8 +1,8 @@
 # enercast-mlops
 
-**End-to-End Production MLOps Reference Project for Time-Series Energy Forecasting**
+**MLOps course project: an end-to-end ML lifecycle for household energy forecasting**
 
-`enercast-mlops` is a production-ready machine learning reference implementation built around the [UCI Appliances Energy Prediction](https://archive.ics.uci.edu/dataset/374/appliances+energy+prediction) dataset. It demonstrates how to take a time-series regression model from versioned data ingestion to automated Continuous Integration, Continuous Deployment, and Continuous Training (**CI/CD/CT**) with zero-downtime model promotion and rollback.
+`enercast-mlops` simulates how a machine learning model is trained, released and operated in a production setting. It predicts household appliance energy use (Wh) from the [UCI Appliances Energy Prediction](https://archive.ics.uci.edu/dataset/374/appliances+energy+prediction) dataset and covers the whole path: versioned data (DVC), tracked experiments and a model registry (MLflow), a containerized inference API, CI/CD with GitHub Actions, and continuous training with gated promotion and rollback.
 
 ---
 
@@ -25,65 +25,50 @@ flowchart TB
 * **Application & Inference**: Python, FastAPI, Pydantic, Scikit-Learn
 * **Data Versioning**: DVC with DagsHub Storage remote
 * **Experiment Tracking & Registry**: MLflow tracking server and model registry on DagsHub
-* **Containerization & Operations**: Slim Docker image adhering to the [Twelve-Factor App](docs/DEPLOYMENT.md) methodology
+* **Containerization & Operations**: Slim Docker image, configured through environment variables
 * **Automation**: GitHub Actions for PR validation, staging verification, production deployment, gated continuous training, and rollback
 
 ---
 
-## Live Service & Quickstart
+## Live Service
 
-* **Production Web App & API**: `https://<your-deployed-service-url>`
-* **Interactive Swagger UI**: `https://<your-deployed-service-url>/docs`
-* **API Contract & Schemas**: See **[`docs/API.md`](docs/API.md)** for full request/response specifications, validation constraints, and status codes.
+* **Production Web App & API**: `https://enercast-mlops-tree.onrender.com`
+* **Interactive Swagger UI**: `https://enercast-mlops-tree.onrender.com/docs`
+* **Sample requests, schemas and errors**: [`docs/API.md`](docs/API.md)
 
-### Quick Sample Request (`POST /predict`)
+Check which model version is serving:
 
 ```bash
-curl -X POST "https://<your-deployed-service-url>/predict" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "date": "2016-05-15 19:30:00",
-    "lights": 20,
-    "T1": 22.5, "RH_1": 41.2, "T2": 21.8, "RH_2": 40.5,
-    "T3": 23.1, "RH_3": 39.8, "T4": 21.4, "RH_4": 38.9,
-    "T5": 20.2, "RH_5": 48.1, "T6": 14.3, "RH_6": 62.0,
-    "T7": 20.8, "RH_7": 37.5, "T8": 22.0, "RH_8": 42.1,
-    "T9": 20.5, "RH_9": 41.0, "To": 13.8, "Pressure": 756.4,
-    "RH_out": 65.0, "Windspeed": 4.2, "Visibility": 40.0, "Tdewpoint": 7.3
-  }'
+curl https://enercast-mlops-tree.onrender.com/model-info
 ```
 
 ---
 
-## Automation Pipelines (CI/CD/CT)
+## Documentation
 
-All GitHub Actions workflows live under `.github/workflows/`:
-
-| Workflow | Trigger | Purpose |
-| :--- | :--- | :--- |
-| **`ci-pr.yml`** | `pull_request` $\rightarrow$ `dev`, `staging`, `main` | Runs static linting, `pytest` suite (with controlled test registry), Docker build, and container smoke test. |
-| **`cd-staging.yml`** | `push` (merge) $\rightarrow$ `staging` | Builds the release candidate, smoke-tests it against the current `@champion`, and publishes the verified image to GHCR (tagged by commit SHA and tree hash). |
-| **`cd-prod.yml`** | `push` (merge) $\rightarrow$ `main` | Selects the image verified in staging (fails if none), deploys it by digest to Render, waits for the deploy to go live, and runs a live prediction + model version smoke test. |
-| **`ct-retrain.yml`** | `workflow_dispatch` (`dataset_version`) | Fetches DVC snapshot from DagsHub, validates data contract, evaluates `@champion`, trains & gates candidate, promotes if passing, and refreshes production. |
-| **`rollback.yml`** | `workflow_dispatch` (`target_version`) | Reassigns `@champion` alias to a previously approved version, refreshes/redeploys production, and verifies via live prediction. |
+| Doc | Scope |
+| :--- | :--- |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Local setup, branch flow and protection, commits, PRs, local checks |
+| [`docs/API.md`](docs/API.md) | HTTP contract: endpoints, schemas, validation, errors, examples |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Configuration, workflows and their triggers, deploying, recovery |
+| [`ml/README_data.md`](ml/README_data.md) | Dataset source, license, versions, splits, DVC hashes, data contract |
+| [`ml/README_experiments.md`](ml/README_experiments.md) | Metric, quality gates, MLflow runs, promotion evidence, CT and rollback logic |
 
 ---
 
-## Repository Structure & Documentation
+## Repository Structure
 
 ```text
 enercast-mlops/
-├── .github/workflows/       # CI, Staging CD, Prod CD, CT Retraining, and Rollback pipelines
-├── .dvc/                    # DVC remote configuration (DagsHub Storage)
-├── data/                    # DVC pointer files (.dvc) for raw data, v1, and v2 splits
-├── docs/
-│   ├── API.md               # REST API schemas, sample payloads, validation rules & error codes
-│   └── DEPLOYMENT.md        # Twelve-Factor App mapping, deployment reproduction & failure recovery
-├── notebooks/               # ML experiments and exploratory analysis
-├── app/                     # FastAPI inference service, MLflow champion loader, and web UI
-├── tests/                   # Pytest suite covering predictions, edge-case inputs, and registry gates
-├── pyproject.toml           # Dependencies, split into runtime / dev / experiment groups
-├── uv.lock                  # Locked dependency versions
-├── Dockerfile               # Slim production Dockerfile (runtime dependencies only)
-└── CONTRIBUTING.md          # Developer setup, Git branching flow, testing & PR checklist
+├── .github/workflows/       # CI/CD, continuous training, rollback
+├── app/                     # Inference API and web UI
+├── data/                    # DVC-tracked datasets
+├── docs/                    # API and deployment docs
+├── ml/                      # Training, promotion policy, model registry
+├── notebooks/               # Exploratory analysis
+├── scripts/                 # Scripts used by GitHub Actions
+├── tests/                   # Pytest suite
+├── Dockerfile               # Production image
+├── pyproject.toml           # Dependencies
+└── CONTRIBUTING.md
 ```
