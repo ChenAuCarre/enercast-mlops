@@ -51,13 +51,14 @@ class ChampionHolder:
         example an older champion trained before the artifact existed) the
         drift monitoring stays disabled instead of failing the service.
         """
-        version = self.version
-        if version is None:
+        state = self.state  # one read: version and run id from the same model
+        if state is None:
             return None
+        info = state[1]
 
-        key = str(version)
+        key = str(info["resolved_version"])
         if key not in self._training_profiles:
-            profile = self._load_training_profile(self.info["mlflow_run_id"])
+            profile = self._load_training_profile(info["mlflow_run_id"])
             if profile is None:
                 return None  # not cached: a transient failure can be retried
             self._training_profiles[key] = profile
