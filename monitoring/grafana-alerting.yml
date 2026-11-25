@@ -1,54 +1,116 @@
 apiVersion: 1
+contactPoints:
+  - orgId: 1
+    name: wattwise-email
+    receivers:
+      - uid: wattwise-email
+        type: email
+        settings:
+          addresses: ${ALERT_EMAIL_TO}
+policies:
+  - orgId: 1
+    receiver: wattwise-email
 groups:
   - orgId: 1
     name: wattwise-api
     folder: WattWise
+    interval: 1m
     rules:
       - uid: wattwise-api-down
-        orgId: 1
         title: "WattWise API down"
-        condition: "A"
+        condition: C
         for: 1m
-        enabled: true
+        noDataState: Alerting
+        execErrState: Error
         labels:
           severity: critical
           service: enercast-api
           team: enercast
         annotations:
           summary: "WattWise prediction API is down"
-          description: "The /health endpoint of the prediction API has been unreachable for more than 1 minute."
+          description: "The Prometheus scrape of the prediction API has failed for more than 1 minute."
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'up{job="api"}'
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: {type: lt, params: [1]}
 
       - uid: wattwise-api-error-rate
-        orgId: 1
         title: "WattWise API high error rate"
-        condition: "A"
+        condition: C
         for: 2m
-        enabled: true
+        noDataState: OK
+        execErrState: Error
         labels:
           severity: warning
           service: enercast-api
           team: enercast
-        for_expr: |
-          sum(rate(http_requests_total{job="api", status=~"5.."}[2m]))
-            /
-            clamp_min(sum(rate(http_requests_total{job="api"}[2m])), 1e-9)
-            > 0.05
         annotations:
           summary: "WattWise API error rate above 5%"
-          description: "More than 5% of /predict requests failed with a 5xx status over 2 minutes."
+          description: "More than 5% of requests failed with a 5xx status over 2 minutes."
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'sum(rate(http_requests_total{job="api", status=~"5.."}[2m])) / clamp_min(sum(rate(http_requests_total{job="api"}[2m])), 1e-9)'
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: {type: gt, params: [0.05]}
 
       - uid: wattwise-api-drift
-        orgId: 1
         title: "WattWise API data drift"
-        condition: "A"
+        condition: C
         for: 2m
-        enabled: true
+        noDataState: OK
+        execErrState: Error
         labels:
           severity: warning
           service: enercast-api
           team: enercast
-        for_expr: |
-          max by (feature) (feature_drift{job="api"}) >= 0.20
         annotations:
           summary: "WattWise API feature drift above threshold"
-          description: "A feature drifted at or above the 0.20 PSI threshold during the last 2 minutes; investigate, do not retrain automatically."
+          description: "A feature drifted above the 0.20 PSI threshold for 2 minutes; investigate, do not retrain automatically."
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: 'max(feature_drift{job="api"})'
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: {type: gt, params: [0.2]}

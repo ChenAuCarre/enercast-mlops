@@ -32,6 +32,7 @@ services:
       GF_SMTP_USER: ${SMTP_USER:-}
       GF_SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       GF_SMTP_FROM_ADDRESS: ${SMTP_FROM:-}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-alerts@example.com}
     volumes:
       - ./monitoring/grafana-datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro
       - ./monitoring/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
