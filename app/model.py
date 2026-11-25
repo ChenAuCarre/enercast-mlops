@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 import mlflow
 
+from app import drift, metrics
 from ml import registry
 
 
@@ -36,4 +37,7 @@ class ChampionHolder:
             "dataset_version": params.get("dataset_version"),
             "loaded_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         }
+        reference = drift.load_reference(mv.run_id, mv.version)  # before the swap
         self.state = (model, info)
+        metrics.SERVED_VERSION.set(int(mv.version))
+        drift.monitor.set_reference(reference)

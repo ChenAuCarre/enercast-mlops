@@ -484,11 +484,7 @@ def rollback_champion(version, model_name=MODEL_NAME, reason=None):
             f"Cannot rollback model version {version}: status is {model_version.status}"
         )
 
-    approved = client.get_model_version_tag(
-        name=model_name,
-        version=str(version),
-        key=CHAMPION_APPROVED_TAG,
-    )
+    approved = (getattr(model_version, "tags", None) or {}).get(CHAMPION_APPROVED_TAG)
 
     if str(getattr(approved, "value", approved)) != "true":
         raise RollbackAuthorizationError(
