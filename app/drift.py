@@ -2,14 +2,27 @@ import logging
 import threading
 from collections import deque
 
+import mlflow
 import pandas as pd
 
 from app import metrics
-from ml.drift import psi
+from ml import registry
+from ml.drift import DISTRIBUTION_ARTIFACT, psi
 
 WINDOW, EVERY, THRESHOLD = 500, 100, 0.20
 
 log = logging.getLogger("app.drift")
+
+
+def load_reference(run_id, version):
+    """Training distribution logged with the champion's run, None if it has none."""
+    # Listing first: downloading a missing artifact retries for minutes.
+    artifacts = registry.get_client().list_artifacts(run_id)
+    if any(a.path == DISTRIBUTION_ARTIFACT for a in artifacts):
+        return mlflow.artifacts.load_dict(f"runs:/{run_id}/{DISTRIBUTION_ARTIFACT}")
+    # champions trained before the artifact existed
+    log.warning("No training distribution for version %s", version)
+    return None
 
 
 class DriftMonitor:

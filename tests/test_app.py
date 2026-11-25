@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from app import config, logs, main, model
+from app import config, drift, logs, main, model
 
 PAYLOAD = {
     "date": "2016-05-15 19:30:00",
@@ -125,10 +125,10 @@ def test_holder_load_swaps_model(monkeypatch):
     run = SimpleNamespace(data=SimpleNamespace(params={"dataset_version": "v2"}))
     monkeypatch.setattr(model.mlflow, "get_run", lambda rid: run)
     ref = {"T1": {"edges": [0.0], "proportions": [0.5, 0.5]}}
-    monkeypatch.setattr(model.mlflow.artifacts, "load_dict", lambda uri: ref)
+    monkeypatch.setattr(drift.mlflow.artifacts, "load_dict", lambda uri: ref)
     artifact = SimpleNamespace(path="training_distribution.json")
     client = SimpleNamespace(list_artifacts=lambda run_id: [artifact])
-    monkeypatch.setattr(model.registry, "get_client", lambda: client)
+    monkeypatch.setattr(drift.registry, "get_client", lambda: client)
     monkeypatch.setattr(model.drift.monitor, "reference", None)
     h = model.ChampionHolder()
     h.load()

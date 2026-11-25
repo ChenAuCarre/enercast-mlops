@@ -1,13 +1,9 @@
-import logging
 from datetime import UTC, datetime
 
 import mlflow
 
 from app import drift, metrics
 from ml import registry
-from ml.drift import DISTRIBUTION_ARTIFACT
-
-log = logging.getLogger("app")
 
 
 class ChampionHolder:
@@ -41,15 +37,7 @@ class ChampionHolder:
             "dataset_version": params.get("dataset_version"),
             "loaded_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         }
-        # Listing first: downloading a missing artifact retries for minutes.
-        artifacts = registry.get_client().list_artifacts(mv.run_id)
-        if any(a.path == DISTRIBUTION_ARTIFACT for a in artifacts):
-            reference = mlflow.artifacts.load_dict(
-                f"runs:/{mv.run_id}/{DISTRIBUTION_ARTIFACT}"
-            )
-        else:  # champions trained before the artifact existed
-            log.warning("No training distribution for version %s", mv.version)
-            reference = None
+        reference = drift.load_reference(mv.run_id, mv.version)  # before the swap
         self.state = (model, info)
         metrics.SERVED_VERSION.set(int(mv.version))
         drift.monitor.set_reference(reference)
